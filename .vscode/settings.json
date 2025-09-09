@@ -1,0 +1,87 @@
+{
+  // === FORMATTING & SAVING ===
+  "editor.formatOnSave": true,
+  "editor.formatOnPaste": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+
+  // === CODE ACTIONS ON SAVE ===
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit",
+    // CRITICAL: Disable VS Code's import sorting to avoid conflicts with @ianvs/prettier-plugin-sort-imports
+    "source.organizeImports": "never"
+  },
+
+  // === FILE-SPECIFIC FORMATTERS ===
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[javascriptreact]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[json]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[css]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+
+  // === TAILWIND CSS v4 SUPPORT ===
+  "tailwindCSS.includeLanguages": {
+    "typescript": "typescript",
+    "typescriptreact": "typescriptreact"
+  },
+  // Enhanced regex for cn() utility and CVA patterns
+  "tailwindCSS.experimental.classRegex": [
+    ["cn\\(([^)]*)\\)", "[\"'`]([^\"'`]*).*?[\"'`]"],
+    ["cva\\(([^)]*)\\)", "[\"'`]([^\"'`]*).*?[\"'`]"],
+    ["clsx\\(([^)]*)\\)", "[\"'`]([^\"'`]*).*?[\"'`]"]
+  ],
+
+  // === TYPESCRIPT OPTIMIZATION ===
+  "typescript.preferences.importModuleSpecifier": "relative",
+  "typescript.suggest.autoImports": true,
+  "typescript.preferences.includePackageJsonAutoImports": "auto",
+  
+  // === NEXT.JS 15 OPTIMIZATIONS ===
+  // Better performance for large Next.js projects
+  "files.exclude": {
+    "**/.next": true,
+    "**/node_modules": true,
+    "**/.git": true,
+    "**/.DS_Store": true,
+    "**/coverage": true,
+    "**/.nyc_output": true
+  },
+  "search.exclude": {
+    "**/.next": true,
+    "**/node_modules": true,
+    "**/coverage": true
+  },
+
+  // === EDITOR CONSISTENCY ===
+  "editor.tabSize": 2,
+  "editor.insertSpaces": true,
+  "editor.detectIndentation": false,
+  "files.eol": "\n",
+
+  // === EMMET FOR JSX ===
+  "emmet.includeLanguages": {
+    "typescript": "typescriptreact",
+    "typescriptreact": "typescriptreact"
+  },
+
+  // === ERROR HIGHLIGHTING ===
+  "problems.showCurrentInStatus": true,
+  
+  // === FILE ASSOCIATIONS ===
+  "files.associations": {
+    "*.css": "tailwindcss",
+    "*.env*": "dotenv"
+  }
+}
