@@ -47,7 +47,7 @@
   "typescript.preferences.importModuleSpecifier": "relative",
   "typescript.suggest.autoImports": true,
   "typescript.preferences.includePackageJsonAutoImports": "auto",
-  
+
   // === NEXT.JS 15 OPTIMIZATIONS ===
   // Better performance for large Next.js projects
   "files.exclude": {
@@ -78,7 +78,7 @@
 
   // === ERROR HIGHLIGHTING ===
   "problems.showCurrentInStatus": true,
-  
+
   // === FILE ASSOCIATIONS ===
   "files.associations": {
     "*.css": "tailwindcss",

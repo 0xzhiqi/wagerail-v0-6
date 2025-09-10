@@ -8,9 +8,9 @@ export function getEnvironment() {
   }
 
   return {
-    isDev: clientEnv.NODE_ENV === 'development',
+    isDevnet: clientEnv.NODE_ENV === 'development',
     isProd: clientEnv.NODE_ENV === 'production',
-    isMainProd:
+    isMainnet:
       clientEnv.NEXT_PUBLIC_APP_ENV === 'production' ||
       currentDomain === 'app.wagerail.com',
     isTestnet:

@@ -1,6 +1,13 @@
 import { z } from 'zod'
 
 const serverEnvSchema = z.object({
+  // Thirdweb environment variables
+  THIRDWEB_SECRET_KEY: z.string().min(1, 'THIRDWEB_SECRET_KEY is required'),
+  THIRDWEB_ADMIN_PRIVATE_KEY: z
+    .string()
+    .min(1, 'THIRDWEB_ADMIN_PRIVATE_KEY is required'),
+
+  // AWS SES environment variables
   AWS_REGION: z.string().default('us-east-1'),
   AWS_ACCESS_KEY: z.string().min(1, 'AWS_ACCESS_KEY is required'),
   AWS_SECRET_ACCESS_KEY: z.string().min(1, 'AWS_SECRET_ACCESS_KEY is required'),
@@ -14,6 +21,8 @@ function createServerEnv() {
       AWS_ACCESS_KEY: process.env.AWS_ACCESS_KEY,
       AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
       AWS_SES_FROM_EMAIL: process.env.AWS_SES_FROM_EMAIL,
+      THIRDWEB_SECRET_KEY: process.env.THIRDWEB_SECRET_KEY,
+      THIRDWEB_ADMIN_PRIVATE_KEY: process.env.THIRDWEB_ADMIN_PRIVATE_KEY,
     })
   } catch (error) {
     if (error instanceof z.ZodError) {

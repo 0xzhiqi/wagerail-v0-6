@@ -4,6 +4,7 @@ import { Geist, Geist_Mono } from 'next/font/google'
 import './globals.css'
 
 import { RootProvider } from '@/providers'
+import { Footer } from '@/components/layout/Footer'
 
 import { getAppUrls } from '../lib/environment'
 
@@ -35,7 +36,10 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <RootProvider>{children}</RootProvider>
+        <RootProvider>
+          {children}
+          <Footer />
+        </RootProvider>
       </body>
     </html>
   )
