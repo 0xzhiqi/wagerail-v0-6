@@ -8,18 +8,20 @@ const serverEnvSchema = z.object({
     .min(1, 'THIRDWEB_ADMIN_PRIVATE_KEY is required'),
 
   // AWS SES environment variables
-  AWS_REGION: z.string().default('us-east-1'),
-  AWS_ACCESS_KEY: z.string().min(1, 'AWS_ACCESS_KEY is required'),
-  AWS_SECRET_ACCESS_KEY: z.string().min(1, 'AWS_SECRET_ACCESS_KEY is required'),
+  AWS_SES_REGION: z.string().default('us-east-1'),
+  AWS_SES_ACCESS_KEY: z.string().min(1, 'AWS_SES_ACCESS_KEY is required'),
+  AWS_SES_SECRET_ACCESS_KEY: z
+    .string()
+    .min(1, 'AWS_SES_SECRET_ACCESS_KEY is required'),
   AWS_SES_FROM_EMAIL: z.string().min(1, 'AWS_SES_FROM_EMAIL is required'),
 })
 
 function createServerEnv() {
   try {
     return serverEnvSchema.parse({
-      AWS_REGION: process.env.AWS_REGION,
-      AWS_ACCESS_KEY: process.env.AWS_ACCESS_KEY,
-      AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
+      AWS_SES_REGION: process.env.AWS_SES_REGION,
+      AWS_SES_ACCESS_KEY: process.env.AWS_SES_ACCESS_KEY,
+      AWS_SES_SECRET_ACCESS_KEY: process.env.AWS_SES_SECRET_ACCESS_KEY,
       AWS_SES_FROM_EMAIL: process.env.AWS_SES_FROM_EMAIL,
       THIRDWEB_SECRET_KEY: process.env.THIRDWEB_SECRET_KEY,
       THIRDWEB_ADMIN_PRIVATE_KEY: process.env.THIRDWEB_ADMIN_PRIVATE_KEY,
