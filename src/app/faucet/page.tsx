@@ -67,7 +67,6 @@ export default function FaucetPage() {
 
   const { faucetApi } = getAppUrls() // Use the new faucetApi URL
 
-  // Authentication check - similar to dashboard
   useEffect(() => {
     const checkAuth = async () => {
       try {
