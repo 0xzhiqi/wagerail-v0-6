@@ -1,6 +1,7 @@
 'use client'
 
 import { Droplet, LogOut, Menu } from 'lucide-react'
+import { useActiveAccount, useConnect } from 'thirdweb/react'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -42,6 +43,10 @@ interface WageGroup {
 }
 
 export default function DashboardPage() {
+  const router = useRouter()
+  const account = useActiveAccount()
+  const { connect } = useConnect()
+
   const [authStatus, setAuthStatus] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
@@ -65,7 +70,11 @@ export default function DashboardPage() {
     lastName: '',
   })
   const [loadingNameData, setLoadingNameData] = useState(false)
-  const router = useRouter()
+
+  // Wallet connection state management (similar to FaucetPage)
+  const [isWalletLoading, setIsWalletLoading] = useState(true)
+  const [walletReconnectAttempted, setWalletReconnectAttempted] =
+    useState(false)
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -88,6 +97,59 @@ export default function DashboardPage() {
 
     checkAuth()
   }, [router])
+
+  // Auto-reconnect wallet on page load (same as FaucetPage)
+  useEffect(() => {
+    const attemptWalletReconnect = async () => {
+      if (walletReconnectAttempted) return
+
+      try {
+        const { thirdwebWallet } = await import('@/lib/clients/thirdweb-wallet')
+        const { thirdwebClient } = await import('@/lib/clients/thirdweb-client')
+
+        console.log('Attempting dashboard wallet auto-reconnect...')
+        await thirdwebWallet.autoConnect({ client: thirdwebClient })
+        console.log(
+          'After autoConnect, wallet account:',
+          thirdwebWallet.getAccount()
+        )
+
+        if (thirdwebWallet.getAccount()) {
+          console.log('Connecting wallet...')
+          await connect(async () => thirdwebWallet)
+          console.log('Dashboard wallet reconnected successfully')
+        }
+      } catch (error) {
+        console.log('Dashboard wallet auto-reconnect failed:', error)
+      } finally {
+        setWalletReconnectAttempted(true)
+      }
+    }
+
+    attemptWalletReconnect()
+  }, [connect, walletReconnectAttempted])
+
+  // Handle wallet loading state (same as FaucetPage)
+  useEffect(() => {
+    if (!walletReconnectAttempted) return
+
+    // Give the wallet some time to initialize
+    const timer = setTimeout(() => {
+      setIsWalletLoading(false)
+    }, 2000) // 2 second timeout
+
+    // If account is available, stop loading immediately
+    if (account?.address) {
+      console.log(
+        'Account address detected, stopping wallet loading:',
+        account.address
+      )
+      setIsWalletLoading(false)
+      clearTimeout(timer)
+    }
+
+    return () => clearTimeout(timer)
+  }, [account?.address, walletReconnectAttempted])
 
   useEffect(() => {
     if (authStatus?.isAuthenticated) {
@@ -177,8 +239,6 @@ export default function DashboardPage() {
 
     try {
       await logoutUser()
-      // The logoutUser function handles the redirect, but we can add a small delay
-      // to ensure the loading state is visible
       setTimeout(() => {
         router.push('/')
       }, 500)
@@ -194,7 +254,7 @@ export default function DashboardPage() {
       const result = await createWageGroup(formData)
 
       if (result.success) {
-        await fetchWageGroups() // Refresh the list
+        await fetchWageGroups()
       } else {
         throw new Error(result.error || 'Failed to create wage group')
       }
@@ -217,7 +277,7 @@ export default function DashboardPage() {
       )
 
       if (result.success) {
-        await fetchWageGroups() // Refresh the list
+        await fetchWageGroups()
         setShowStatusDialog(false)
         setSelectedWageGroup(null)
       } else {
@@ -291,6 +351,17 @@ export default function DashboardPage() {
       </div>
     )
   }
+
+  // Determine the account to pass to TopUpDialog
+  // Only pass account if wallet reconnection is complete and account exists
+  const connectedAccount =
+    !isWalletLoading && walletReconnectAttempted && account?.address
+      ? account
+      : null
+  console.log(
+    'Dashboard rendering, connectedAccount address:',
+    connectedAccount?.address
+  )
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-purple-50">
@@ -368,10 +439,12 @@ export default function DashboardPage() {
         isCreating={isCreating}
       />
 
+      {/* Pass connectedAccount to TopUpDialog - only when wallet is properly connected */}
       <TopUpDialog
         open={showTopUpDialog}
         onOpenChange={setShowTopUpDialog}
         wageGroup={selectedWageGroup}
+        account={connectedAccount} // This will be null until wallet is properly connected
       />
 
       <EditNameDialog
