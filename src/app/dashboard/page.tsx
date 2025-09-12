@@ -2,13 +2,17 @@
 
 import {
   BanknoteArrowUp,
-  Coins,
+  Droplet,
   Group,
   LogOut,
   Mail,
+  Menu,
   Plus,
   Power,
+  Shield,
+  ShieldCheck,
   Wallet,
+  X,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -23,6 +27,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { TopUpDialog } from '@/components/TopUpDialog'
 import { WageGroupCreateDialog } from '@/components/WageGroupCreateDialog'
 import { checkAuthStatus, logoutUser } from '@/actions/auth'
@@ -51,11 +61,14 @@ export default function DashboardPage() {
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [showTopUpDialog, setShowTopUpDialog] = useState(false)
   const [showStatusDialog, setShowStatusDialog] = useState(false)
+  const [showLogoutDialog, setShowLogoutDialog] = useState(false)
   const [selectedWageGroup, setSelectedWageGroup] = useState<WageGroup | null>(
     null
   )
   const [isCreating, setIsCreating] = useState(false)
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false)
+  const [eercRegistered, setEercRegistered] = useState<boolean | null>(null)
+  const [loadingEercStatus, setLoadingEercStatus] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
@@ -83,6 +96,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (authStatus?.isAuthenticated) {
       fetchWageGroups()
+      fetchEercStatus()
     }
   }, [authStatus])
 
@@ -106,6 +120,31 @@ export default function DashboardPage() {
       console.error('Error fetching wage groups:', error)
     } finally {
       setLoadingWageGroups(false)
+    }
+  }
+
+  const fetchEercStatus = async () => {
+    try {
+      setLoadingEercStatus(true)
+      const response = await fetch('/api/user/eerc-registration-status', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setEercRegistered(data.eercRegistered)
+      } else {
+        console.error('Failed to fetch eERC status:', response.statusText)
+        setEercRegistered(false)
+      }
+    } catch (error) {
+      console.error('Error fetching eERC status:', error)
+      setEercRegistered(false)
+    } finally {
+      setLoadingEercStatus(false)
     }
   }
 
@@ -224,24 +263,30 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <Button
-            variant="outline"
-            onClick={handleLogout}
-            disabled={isLoggingOut}
-            className="flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isLoggingOut ? (
-              <>
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-600 mr-2"></div>
-                <span>Logging out...</span>
-              </>
-            ) : (
-              <>
+          {/* Dropdown Menu */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="flex items-center space-x-2">
+                <Menu className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem
+                onClick={() => setShowLogoutDialog(true)}
+                className="flex items-center space-x-2"
+              >
                 <LogOut className="h-4 w-4" />
                 <span>Logout</span>
-              </>
-            )}
-          </Button>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => router.push('/faucet')}
+                className="flex items-center space-x-2"
+              >
+                <Droplet className="h-4 w-4" />
+                <span>Testnet Faucet</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         {/* User Information Cards */}
@@ -251,65 +296,52 @@ export default function DashboardPage() {
             <CardHeader className="flex flex-row items-center space-y-0 pb-2">
               <CardTitle className="text-sm font-medium flex items-center space-x-2">
                 <Mail className="h-4 w-4 text-purple-600" />
-                <span>Email Address</span>
+                <span className="font-bold">Email Address</span>
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-gray-900">
+              <div className="text-lg text-gray-900">
                 {authStatus.user?.email || 'No email found'}
               </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                Your registered email address
-              </p>
             </CardContent>
           </Card>
 
           {/* Wallet Address Card */}
           <Card>
-            <CardHeader className="flex flex-row items-center space-y-0 pb-2">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium flex items-center space-x-2">
                 <Wallet className="h-4 w-4 text-purple-600" />
-                <span>Wallet Address</span>
+                <span className="font-bold">Wallet Address</span>
               </CardTitle>
+
+              {/* eERC Registration Status */}
+              <div className="flex items-center space-x-2">
+                {loadingEercStatus ? (
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-600"></div>
+                ) : eercRegistered ? (
+                  <div className="flex items-center space-x-1 text-green-600 bg-green-50 px-2 py-1 rounded-md">
+                    <ShieldCheck className="h-4 w-4" />
+                    <span className="text-xs font-medium">eERC Registered</span>
+                  </div>
+                ) : (
+                  <Button
+                    size="sm"
+                    onClick={() => router.push('/eerc-registration')}
+                    className="bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-xs h-7"
+                  >
+                    <Shield className="h-3 w-3 mr-1" />
+                    Register Wallet
+                  </Button>
+                )}
+              </div>
             </CardHeader>
             <CardContent>
-              <div className="text-lg font-mono text-gray-900 break-all">
+              <div className="text-lg text-gray-900 break-all">
                 {authStatus.address || 'No wallet address found'}
               </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                Your smart wallet address
-              </p>
             </CardContent>
           </Card>
         </div>
-
-        {/* Testnet Faucet Card */}
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle className="flex items-center space-x-2">
-              <Coins className="h-5 w-5 text-purple-600" />
-              <span>Testnet Faucet</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-gray-600 mb-2">
-                  Get test AVAX and USDC tokens
-                </p>
-                <p className="text-sm text-gray-500">
-                  Free testnet tokens with no real value
-                </p>
-              </div>
-              <Button
-                onClick={() => router.push('/faucet')}
-                className="bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700"
-              >
-                Get Tokens
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
 
         {/* Wage Payment Groups Section */}
         <Card className="mb-8">
@@ -605,7 +637,7 @@ export default function DashboardPage() {
                 <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4">
                   <Group className="h-6 w-6 text-purple-600" />
                 </div>
-                <h4 className="text-lg font-medium text-gray-900 mb-2">
+                <h4 className="text-lg font-medium text-gray-900mb-2">
                   No payment groups yet
                 </h4>
                 <p className="text-gray-500 mb-6">
@@ -678,6 +710,49 @@ export default function DashboardPage() {
                 : selectedWageGroup?.isActive
                   ? 'Deactivate'
                   : 'Activate'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Logout Confirmation Dialog */}
+      <Dialog open={showLogoutDialog} onOpenChange={setShowLogoutDialog}>
+        <DialogContent className="sm:max-w-md" showCloseButton={false}>
+          {/* Header */}
+          <div className="bg-gradient-to-r from-purple-100 to-violet-100 border-b border-purple-200 rounded-t-lg p-6 -m-6 mb-6">
+            <DialogTitle className="text-2xl font-semibold text-purple-900">
+              Confirm Logout
+            </DialogTitle>
+          </div>
+
+          {/* Content */}
+          <div className="space-y-4">
+            <DialogDescription className="text-gray-600">
+              You will need to authenticate again to access your dashboard.
+            </DialogDescription>
+          </div>
+
+          <DialogFooter className="mt-6">
+            <Button
+              variant="outline"
+              onClick={() => setShowLogoutDialog(false)}
+              className="mr-2"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleLogout}
+              disabled={isLoggingOut}
+              className="bg-purple-600 hover:bg-purple-500 text-white"
+            >
+              {isLoggingOut ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  <span>Logging out...</span>
+                </>
+              ) : (
+                'Logout'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
