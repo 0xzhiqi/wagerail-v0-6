@@ -1,16 +1,8 @@
 'use client'
 
-import { Wallet } from 'lucide-react'
+import { Wallet, X } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
@@ -64,121 +56,122 @@ export function TopUpDialog({
     }
   }
 
-  if (!wageGroup) return null
+  if (!open || !wageGroup) return null
 
   const monthlyTotal = calculateMonthlyTotal()
+  // Updated to 1, 2, 3, 6 months
   const suggestedAmounts = [
-    monthlyTotal,
-    monthlyTotal * 2,
-    monthlyTotal * 3,
-    monthlyTotal * 6,
+    { months: 1, amount: monthlyTotal },
+    { months: 2, amount: monthlyTotal * 2 },
+    { months: 3, amount: monthlyTotal * 3 },
+    { months: 6, amount: monthlyTotal * 6 },
   ]
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md bg-gradient-to-br from-purple-50 via-violet-50/50 to-white border-purple-100/50">
-        <DialogHeader className="text-center">
-          <div className="mx-auto bg-gradient-to-r from-indigo-500 to-blue-600 rounded-full p-3 w-fit mb-4">
+    <div className="fixed inset-0 backdrop-blur-md bg-white/30 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg max-w-md w-full mx-4 relative border border-purple-100/50 shadow-2xl">
+        {/* Close button */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onOpenChange(false)}
+          className="absolute top-4 right-4 z-10 h-8 w-8 p-0 text-purple-400 hover:text-purple-600 hover:bg-purple-100/50 rounded-full"
+        >
+          <X className="h-4 w-4" />
+        </Button>
+
+        {/* Header */}
+        <div className="bg-gradient-to-r from-purple-100 to-violet-100 border-b border-purple-200 rounded-t-lg p-6 pr-12">
+          <div className="mx-auto bg-gradient-to-r from-purple-500 to-purple-600 rounded-full p-3 w-fit mb-4">
             <Wallet className="h-6 w-6 text-white" />
           </div>
-          <DialogTitle className="text-purple-900">
+          <h2 className="text-2xl font-semibold text-purple-900 text-center">
             Add Funds to {wageGroup.name}
-          </DialogTitle>
-          <DialogDescription className="text-purple-600/70">
-            Top up your payment group with USDC tokens
-          </DialogDescription>
-        </DialogHeader>
+          </h2>
+          <p className="text-purple-600/70 text-center mt-2">
+            Top up your payment group account with USDC
+          </p>
+        </div>
 
-        <div className="space-y-6 py-4">
-          {/* Monthly Total Info */}
-          <div className="bg-purple-50/50 rounded-lg p-4 text-center">
-            <p className="text-sm text-purple-600 mb-1">
-              Monthly Payment Total
-            </p>
-            <p className="text-2xl font-bold text-purple-900">
-              ${monthlyTotal.toFixed(2)} USDC
-            </p>
-            <p className="text-xs text-purple-500 mt-1">
-              {wageGroup.payees.length} team member
-              {wageGroup.payees.length !== 1 ? 's' : ''}
-            </p>
-          </div>
+        {/* Content */}
+        <div className="p-6">
+          <div className="space-y-6">
+            {/* Monthly Total Info */}
+            <div className="bg-purple-50/50 rounded-lg p-4 text-center">
+              <p className="text-sm text-purple-600 mb-1">
+                Monthly Payment Total
+              </p>
+              <p className="text-2xl font-bold text-purple-900">
+                ${monthlyTotal.toFixed(2)} USDC
+              </p>
+              <p className="text-xs text-purple-500 mt-1">
+                {wageGroup.payees.length} team member
+                {wageGroup.payees.length !== 1 ? 's' : ''}
+              </p>
+            </div>
 
-          {/* Amount Input */}
-          <div className="space-y-2">
-            <Label htmlFor="amount" className="text-purple-700 font-medium">
-              Amount to Add (USDC)
-            </Label>
-            <Input
-              id="amount"
-              type="number"
-              step="0.01"
-              min="0"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="Enter amount..."
-              className="border-purple-200 focus:border-purple-400 focus:ring-purple-400 text-lg"
-            />
-          </div>
+            {/* Amount Input */}
+            <div className="space-y-2">
+              <Label htmlFor="amount" className="text-purple-700 font-medium">
+                Amount to Add (USDC)
+              </Label>
+              <Input
+                id="amount"
+                type="number"
+                step="0.01"
+                min="0"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="Enter amount..."
+                className="border-purple-200 focus:border-purple-400 focus:ring-purple-400 text-lg"
+              />
+            </div>
 
-          {/* Quick Amount Buttons */}
-          <div className="space-y-2">
-            <Label className="text-purple-700 font-medium text-sm">
-              Quick Amounts
-            </Label>
-            <div className="grid grid-cols-2 gap-2">
-              {suggestedAmounts.map((suggestedAmount, index) => (
-                <Button
-                  key={index}
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setAmount(suggestedAmount.toString())}
-                  className="border-purple-200 text-purple-700 hover:bg-purple-50 hover:border-purple-300"
-                  disabled={isLoading}
-                >
-                  ${suggestedAmount.toFixed(0)}
-                  <span className="text-xs ml-1">
-                    ({index + 1} month{index !== 0 ? 's' : ''})
-                  </span>
-                </Button>
-              ))}
+            {/* Quick Amount Buttons */}
+            <div className="space-y-2">
+              <Label className="text-purple-700 font-medium text-sm">
+                Quick Amounts
+              </Label>
+              <div className="grid grid-cols-2 gap-2">
+                {suggestedAmounts.map((suggestion, index) => (
+                  <Button
+                    key={index}
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setAmount(suggestion.amount.toString())}
+                    className="border-purple-200 text-purple-700 hover:text-purple-800 hover:bg-purple-50 hover:border-purple-300"
+                    disabled={isLoading}
+                  >
+                    ${suggestion.amount.toFixed(0)}
+                    <span className="text-xs ml-1">
+                      ({suggestion.months} month
+                      {suggestion.months !== 1 ? 's' : ''})
+                    </span>
+                  </Button>
+                ))}
+              </div>
             </div>
           </div>
 
-          {/* Coming Soon Notice */}
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-            <p className="text-sm text-amber-800 text-center">
-              💡 Wallet integration coming soon! This will connect to your
-              wallet for USDC transfers.
-            </p>
+          {/* Action button */}
+          <div className="mt-6">
+            <Button
+              onClick={handleTopUp}
+              disabled={isLoading || !amount || parseFloat(amount) <= 0}
+              className="bg-gradient-to-r w-full from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white"
+            >
+              {isLoading ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Adding Funds...
+                </>
+              ) : (
+                `Add $${amount || '0'} USDC`
+              )}
+            </Button>
           </div>
         </div>
-
-        <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={isLoading}
-            className="border-purple-200 text-purple-700 hover:bg-purple-50"
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={handleTopUp}
-            disabled={isLoading || !amount || parseFloat(amount) <= 0}
-            className="bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-600 hover:to-blue-700 text-white"
-          >
-            {isLoading ? (
-              <>
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                Adding Funds...
-              </>
-            ) : (
-              `Add $${amount || '0'} USDC`
-            )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>
   )
 }

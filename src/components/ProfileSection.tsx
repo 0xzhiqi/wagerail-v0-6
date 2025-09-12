@@ -66,7 +66,7 @@ export function ProfileSection({
             {loadingNameData ? (
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-600"></div>
             ) : (
-              <div className="text-lg text-gray-900">
+              <div className="text-sm font-semibold text-gray-900">
                 {formatDisplayName(
                   nameData.firstName,
                   nameData.middleName,
@@ -103,7 +103,7 @@ export function ProfileSection({
                 Email Address
               </span>
             </div>
-            <div className="text-lg text-gray-900">
+            <div className="text-sm font-semibold text-gray-900">
               {authStatus.user?.email || 'No email found'}
             </div>
           </div>
@@ -121,7 +121,7 @@ export function ProfileSection({
                 Wallet Address
               </span>
             </div>
-            <div className="text-lg text-gray-900 break-all">
+            <div className="text-sm font-semibold text-gray-900 break-all">
               {authStatus.address || 'No wallet address found'}
             </div>
           </div>
