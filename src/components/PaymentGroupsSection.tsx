@@ -88,8 +88,8 @@ export function PaymentGroupsSection({
                       {/* Payment Date */}
                       <div className="bg-white/70 backdrop-blur-sm rounded-lg p-3 border border-white/50">
                         <div className="flex items-center space-x-2">
-                          <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                          <span className="text-xs font-medium text-blue-600 uppercase tracking-wide">
+                          <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
+                          <span className="text-xs font-medium text-purple-600 uppercase tracking-wide">
                             Payment Date
                           </span>
                         </div>
@@ -109,9 +109,21 @@ export function PaymentGroupsSection({
                       {/* Start Date */}
                       <div className="bg-white/70 backdrop-blur-sm rounded-lg p-3 border border-white/50">
                         <div className="flex items-center space-x-2">
-                          <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
-                          <span className="text-xs font-medium text-emerald-600 uppercase tracking-wide">
-                            Started
+                          <div
+                            className={`w-2 h-2 rounded-full ${
+                              new Date() >= new Date(group.startDate)
+                                ? 'bg-emerald-500'
+                                : 'bg-gray-400'
+                            }`}
+                          ></div>
+                          <span
+                            className={`text-xs font-medium uppercase tracking-wide ${
+                              new Date() >= new Date(group.startDate)
+                                ? 'text-emerald-600'
+                                : 'text-gray-600'
+                            }`}
+                          >
+                            Start Date
                           </span>
                         </div>
                         <p className="text-sm font-semibold text-gray-900 mt-1">
@@ -146,8 +158,14 @@ export function PaymentGroupsSection({
                               <div
                                 className={`w-2 h-2 rounded-full ${group.isActive ? 'bg-green-500' : 'bg-gray-400'}`}
                               ></div>
-                              <span className="text-xs font-medium text-gray-600 uppercase tracking-wide">
-                                Active Status
+                              <span
+                                className={`text-xs font-medium uppercase tracking-wide ${
+                                  group.isActive
+                                    ? 'text-green-600'
+                                    : 'text-gray-600'
+                                }`}
+                              >
+                                Payment Status
                               </span>
                             </div>
                             <p className="text-sm font-semibold text-gray-900 flex items-center space-x-1">
@@ -285,11 +303,11 @@ export function PaymentGroupsSection({
 
                     {/* Enhanced Top Up Button */}
                     <button
-                      className="group/btn relative w-full bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-600 hover:to-blue-700 text-white font-semibold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 overflow-hidden"
+                      className="group/btn relative w-full bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 text-white font-semibold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 overflow-hidden"
                       onClick={() => onTopUpClick(group)}
                     >
                       {/* Animated background effect */}
-                      <div className="absolute inset-0 bg-gradient-to-r from-blue-400 to-indigo-400 opacity-0 group-hover/btn:opacity-100 transition-opacity duration-300"></div>
+                      <div className="absolute inset-0 bg-gradient-to-r from-purple-400 to-violet-400 opacity-0 group-hover/btn:opacity-100 transition-opacity duration-300"></div>
 
                       {/* Button content */}
                       <div className="relative flex items-center justify-center space-x-2">
