@@ -6,10 +6,7 @@ import {
   poseidonEncrypt,
 } from 'maci-crypto'
 
-// Base point order for baby-jubjub curve
-const BASE_POINT_ORDER = BigInt(
-  '2736030358979909402780800718157159386076813972158567259200215660948447373041'
-)
+import { BASE_POINT_ORDER } from './constants/eerc-params'
 
 /**
  * Browser-compatible random bytes generator using Web Crypto API

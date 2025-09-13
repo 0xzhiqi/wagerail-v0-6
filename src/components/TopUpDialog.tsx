@@ -8,10 +8,13 @@ import {
   sendTransaction,
 } from 'thirdweb'
 import { approve, balanceOf } from 'thirdweb/extensions/erc20'
+import { Account } from 'thirdweb/wallets'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { USDC_ABI, YIELD_VAULT_ABI } from '@/lib/constants/abis'
+import { EERC_ABI, USDC_ABI, YIELD_VAULT_ABI } from '@/lib/constants/abis'
 import { CONTRACT_ADDRESSES } from '@/lib/constants/contract-addresses'
+import { deriveKeysFromUser, getDecryptedBalance } from '@/lib/crypto-utils'
 import { chain } from '@/lib/environment/get-chain'
+import { processPoseidonEncryption } from '@/lib/poseidon'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -30,7 +33,7 @@ interface TopUpDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   wageGroup: WageGroup | null
-  account: any
+  account: Account | null
 }
 
 export function TopUpDialog({
@@ -44,7 +47,8 @@ export function TopUpDialog({
   const [showSuccess, setShowSuccess] = useState(false)
   const [successData, setSuccessData] = useState<{
     usdcDeposited: number
-    sharesReceived: number
+    sharesReceived?: number
+    encryptedTokensReceived: number
   } | null>(null)
 
   const [usdcBalance, setUsdcBalance] = useState<bigint | null>(null)
@@ -76,6 +80,18 @@ export function TopUpDialog({
       chain,
       address: CONTRACT_ADDRESSES.USDC,
       abi: USDC_ABI,
+    })
+  }, [thirdwebClient])
+
+  // Memoize the EERC contract
+  const eercContract = useMemo(() => {
+    if (!thirdwebClient) return null
+    console.log('TopUpDialog: Creating eercContract')
+    return getContract({
+      client: thirdwebClient,
+      chain,
+      address: CONTRACT_ADDRESSES.EERC,
+      abi: EERC_ABI,
     })
   }, [thirdwebClient])
 
@@ -183,93 +199,256 @@ export function TopUpDialog({
     }
   }
 
+  // Helper function to deposit into EERC contract
+  const depositIntoEERC = async (
+    tokenToDeposit: any,
+    depositAmount: bigint,
+    tokenAddress: string
+  ) => {
+    if (!eercContract || !account) return null
+
+    console.log('TopUpDialog: Starting EERC deposit process...')
+
+    // Generate keys for the user using the account directly
+    const { privateKey: userPrivateKey, publicKey: derivedPublicKey } =
+      await deriveKeysFromUser(account.address, account)
+    console.log('TopUpDialog: Generated keys for EERC deposit')
+
+    // Generate amountPCT for auditing
+    const depositAmountBigInt = BigInt(depositAmount.toString())
+    const publicKeyBigInt = [derivedPublicKey[0], derivedPublicKey[1]]
+
+    const {
+      ciphertext: amountCiphertext,
+      nonce: amountNonce,
+      authKey: amountAuthKey,
+    } = processPoseidonEncryption([depositAmountBigInt], publicKeyBigInt)
+
+    // A Poseidon-Ciphertext (PCT) is a 7-element array composed of:
+    // [ciphertext (4 elements), authKey (2 elements), nonce (1 element)]
+    const amountPCT: [bigint, bigint, bigint, bigint, bigint, bigint, bigint] =
+      [
+        ...amountCiphertext.slice(0, 4), // First 4 elements of ciphertext
+        ...amountAuthKey, // Next 2 elements are the authKey
+        amountNonce, // Final element is the nonce
+      ] as [bigint, bigint, bigint, bigint, bigint, bigint, bigint]
+
+    console.log('TopUpDialog: Generated amountPCT for EERC deposit')
+
+    // Approve EERC contract to spend tokens
+    console.log('TopUpDialog: Approving EERC contract to spend tokens...')
+    const approveEERCTransaction = approve({
+      contract: tokenToDeposit,
+      spender: CONTRACT_ADDRESSES.EERC,
+      amount: depositAmount.toString(),
+    })
+
+    await sendTransaction({
+      transaction: approveEERCTransaction,
+      account: account,
+    })
+    console.log('TopUpDialog: EERC approval successful')
+
+    // Get encrypted balance before deposit
+    let balanceBeforeDeposit = 0n
+    try {
+      const [eGCT, nonce, amountPCTs, balancePCT, transactionIndex] =
+        await readContract({
+          contract: eercContract,
+          method: 'getBalanceFromTokenAddress',
+          params: [account.address, tokenAddress],
+        })
+
+      const encryptedBalance = [
+        [BigInt(eGCT.c1.x.toString()), BigInt(eGCT.c1.y.toString())],
+        [BigInt(eGCT.c2.x.toString()), BigInt(eGCT.c2.y.toString())],
+      ]
+      const balancePCTArray = balancePCT.map((x: any) => BigInt(x.toString()))
+
+      balanceBeforeDeposit = await getDecryptedBalance(
+        userPrivateKey,
+        [...amountPCTs],
+        balancePCTArray,
+        encryptedBalance
+      )
+      console.log(
+        'TopUpDialog: Balance before EERC deposit:',
+        balanceBeforeDeposit.toString()
+      )
+    } catch (error) {
+      console.log('TopUpDialog: No existing EERC balance found (first deposit)')
+    }
+
+    // Deposit into EERC contract
+    console.log('TopUpDialog: Depositing into EERC contract...')
+    const eercDepositTransaction = prepareContractCall({
+      contract: eercContract,
+      method: 'deposit',
+      params: [depositAmount, tokenAddress, amountPCT],
+    })
+
+    await sendTransaction({
+      transaction: eercDepositTransaction,
+      account: account,
+    })
+    console.log('TopUpDialog: EERC deposit successful')
+
+    // Get encrypted balance after deposit to calculate received tokens
+    let balanceAfterDeposit = 0n
+    try {
+      // Wait a bit for the transaction to be processed
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+
+      const [eGCT, nonce, amountPCTs, balancePCT, transactionIndex] =
+        await readContract({
+          contract: eercContract,
+          method: 'getBalanceFromTokenAddress',
+          params: [account.address, tokenAddress],
+        })
+
+      const encryptedBalance = [
+        [BigInt(eGCT.c1.x.toString()), BigInt(eGCT.c1.y.toString())],
+        [BigInt(eGCT.c2.x.toString()), BigInt(eGCT.c2.y.toString())],
+      ]
+      const balancePCTArray = balancePCT.map((x: any) => BigInt(x.toString()))
+
+      balanceAfterDeposit = await getDecryptedBalance(
+        userPrivateKey,
+        [...amountPCTs], // Convert readonly array to mutable array
+        balancePCTArray,
+        encryptedBalance
+      )
+      console.log(
+        'TopUpDialog: Balance after EERC deposit:',
+        balanceAfterDeposit.toString()
+      )
+    } catch (error) {
+      console.error(
+        'TopUpDialog: Error getting balance after EERC deposit:',
+        error
+      )
+    }
+
+    const encryptedTokensReceived = balanceAfterDeposit - balanceBeforeDeposit
+    console.log(
+      'TopUpDialog: Encrypted tokens received:',
+      encryptedTokensReceived.toString()
+    )
+
+    return Number(encryptedTokensReceived) / 1e2 // Convert from encrypted system decimals (2)
+  }
+
   const handleTopUp = async () => {
     if (!wageGroup || !amount || parseFloat(amount) <= 0 || !account) return
-
-    const vaultAddress = getVaultAddress(wageGroup.yieldSource)
-    if (!vaultAddress) {
-      console.log('No yield source specified, skipping deposit')
-      onOpenChange(false)
-      return
-    }
-    console.log('vaultAddress', vaultAddress)
 
     try {
       setIsLoading(true)
 
       const depositAmount = BigInt(Math.floor(parseFloat(amount) * 1e6))
 
-      // Create vault contract
-      const vaultContract = getContract({
-        client: thirdwebClient,
-        chain,
-        address: vaultAddress,
-        abi: YIELD_VAULT_ABI,
-      })
-
-      // Get vault shares balance before deposit
-      const sharesBefore = await readContract({
-        contract: vaultContract,
-        method: 'balanceOf',
-        params: [account.address],
-      })
-
-      if (!usdcContract) {
-        // Handle the case where contract is not available
-        console.error('Contract not initialized')
+      if (!usdcContract || !eercContract) {
+        console.error('Contracts not initialized')
         return
       }
 
-      // Step 1: Approve USDC spending using extension
-      const approveTransaction = approve({
-        contract: usdcContract,
-        spender: vaultAddress,
-        amount: amount,
-      })
+      let sharesReceived: number | undefined
+      let encryptedTokensReceived: number
 
-      const approvalTransactionReceipt = await sendTransaction({
-        transaction: approveTransaction,
-        account: account,
-      })
-      console.log('approvalTransactionReceipt:', approvalTransactionReceipt)
+      if (wageGroup.yieldSource === 'none' || !wageGroup.yieldSource) {
+        // Direct USDC deposit into EERC
+        console.log('TopUpDialog: Direct USDC to EERC deposit')
 
-      // Step 2: Deposit USDC into vault
-      const depositTransaction = prepareContractCall({
-        contract: vaultContract,
-        method: 'deposit',
-        params: [depositAmount, account.address],
-      })
+        encryptedTokensReceived =
+          (await depositIntoEERC(
+            usdcContract,
+            depositAmount,
+            CONTRACT_ADDRESSES.USDC
+          )) || 0
+      } else {
+        // Deposit into yield vault first, then into EERC
+        const vaultAddress = getVaultAddress(wageGroup.yieldSource)
+        if (!vaultAddress) {
+          console.log('No yield source specified, skipping deposit')
+          onOpenChange(false)
+          return
+        }
 
-      const depositTransactionReceipt = await sendTransaction({
-        transaction: depositTransaction,
-        account: account,
-      })
-      console.log(
-        'TopUpDialog: depositTransactionReceipt:',
-        depositTransactionReceipt
-      )
+        console.log('TopUpDialog: Vault address:', vaultAddress)
 
-      const decimals = await readContract({
-        contract: vaultContract,
-        method: 'decimals',
-        params: [account.address],
-      })
-      console.log('TopUpDialog: decimals:', decimals)
+        // Create vault contract
+        const vaultContract = getContract({
+          client: thirdwebClient,
+          chain,
+          address: vaultAddress,
+          abi: YIELD_VAULT_ABI,
+        })
 
-      // Get vault shares balance after deposit
-      const sharesAfter = await readContract({
-        contract: vaultContract,
-        method: 'balanceOf',
-        params: [account.address],
-      })
-      console.log('TopUpDialog: sharesBefore:', sharesBefore)
-      console.log('TopUpDialog: sharesAfter:', sharesAfter)
-      const sharesReceived = Number(sharesAfter - sharesBefore)
+        // Get vault shares balance before deposit
+        const sharesBefore = await readContract({
+          contract: vaultContract,
+          method: 'balanceOf',
+          params: [account.address],
+        })
+
+        // Step 1: Approve USDC spending for vault
+        const approveTransaction = approve({
+          contract: usdcContract,
+          spender: vaultAddress,
+          amount: amount,
+        })
+
+        const approvalTransactionReceipt = await sendTransaction({
+          transaction: approveTransaction,
+          account: account,
+        })
+        console.log(
+          'TopUpDialog: Vault approval successful:',
+          approvalTransactionReceipt
+        )
+
+        // Step 2: Deposit USDC into vault
+        const depositTransaction = prepareContractCall({
+          contract: vaultContract,
+          method: 'deposit',
+          params: [depositAmount, account.address],
+        })
+
+        const depositTransactionReceipt = await sendTransaction({
+          transaction: depositTransaction,
+          account: account,
+        })
+        console.log(
+          'TopUpDialog: Vault deposit successful:',
+          depositTransactionReceipt
+        )
+
+        // Get vault shares balance after deposit
+        const sharesAfter = await readContract({
+          contract: vaultContract,
+          method: 'balanceOf',
+          params: [account.address],
+        })
+
+        const sharesReceivedBigInt = sharesAfter - sharesBefore
+        sharesReceived = Number(sharesReceivedBigInt) / 1e6 // Assuming 6 decimals for vault shares
+        console.log('TopUpDialog: Shares received:', sharesReceived)
+
+        // Step 3: Deposit vault shares into EERC
+        console.log('TopUpDialog: Depositing vault shares into EERC...')
+
+        encryptedTokensReceived =
+          (await depositIntoEERC(
+            vaultContract,
+            sharesReceivedBigInt,
+            vaultAddress
+          )) || 0
+      }
 
       // Store success data
       setSuccessData({
         usdcDeposited: parseFloat(amount),
-        sharesReceived: sharesReceived / 1e6, // Assuming 6 decimals for vault shares
+        sharesReceived,
+        encryptedTokensReceived,
       })
 
       // Show success state
@@ -288,7 +467,7 @@ export function TopUpDialog({
         setShowSuccess(false)
         setSuccessData(null)
         onOpenChange(false)
-      }, 1500)
+      }, 3000) // Increased timeout to show more details
     } catch (error) {
       console.error('TopUpDialog: Error during top-up:', error)
       // TODO: Add proper error handling/toast notification
@@ -347,21 +526,29 @@ export function TopUpDialog({
             <div className="bg-gradient-to-r from-green-400 to-emerald-500 rounded-full p-4 mb-6 shadow-lg">
               <CheckCircle className="w-12 h-12 text-white" />
             </div>
-            <h3 className="text-2xl font-semibold text-purple-900 mb-2 text-center">
+            <h3 className="text-2xl font-semibold text-purple-900 mb-4 text-center">
               Successfully Added Funds!
             </h3>
             {successData && (
-              <div className="text-center space-y-1">
+              <div className="text-center space-y-2">
                 <p className="text-purple-600/70">
                   Deposited:{' '}
                   <span className="font-semibold">
                     ${successData.usdcDeposited.toFixed(2)} USDC
                   </span>
                 </p>
+                {successData.sharesReceived && (
+                  <p className="text-purple-600/70">
+                    Vault Shares Received:{' '}
+                    <span className="font-semibold">
+                      {successData.sharesReceived.toFixed(2)}
+                    </span>
+                  </p>
+                )}
                 <p className="text-purple-600/70">
-                  Vault Shares Received:{' '}
+                  Encrypted Tokens Received:{' '}
                   <span className="font-semibold">
-                    {successData.sharesReceived.toFixed(2)}
+                    {successData.encryptedTokensReceived.toFixed(2)}
                   </span>
                 </p>
               </div>
@@ -379,6 +566,9 @@ export function TopUpDialog({
               </h2>
               <p className="text-purple-600/70 text-center mt-2">
                 Top up your payment group account with USDC
+                {wageGroup.yieldSource !== 'none' &&
+                  wageGroup.yieldSource &&
+                  ` via ${wageGroup.yieldSource} yield vault`}
               </p>
             </div>
 
@@ -405,7 +595,7 @@ export function TopUpDialog({
                     htmlFor="amount"
                     className="text-purple-700 font-medium"
                   >
-                    Amount to Add (USDC)
+                    Top Up Amount
                   </Label>
                   <Input
                     id="amount"
@@ -473,7 +663,7 @@ export function TopUpDialog({
                         className="border-purple-200 text-purple-700 hover:text-purple-800 hover:bg-purple-50 hover:border-purple-300"
                         disabled={isLoading}
                       >
-                        ${suggestion.amount.toFixed(0)}
+                        {suggestion.amount.toFixed(0)} USDC
                         <span className="text-xs ml-1">
                           ({suggestion.months} month
                           {suggestion.months !== 1 ? 's' : ''})
@@ -499,9 +689,9 @@ export function TopUpDialog({
                   {isLoading ? (
                     <>
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                      {wageGroup.yieldSource !== 'none'
-                        ? 'Depositing to Vault...'
-                        : 'Adding Funds...'}
+                      {wageGroup.yieldSource !== 'none' && wageGroup.yieldSource
+                        ? 'Processing via Yield Vault & Encryption...'
+                        : 'Processing Encrypted Deposit...'}
                     </>
                   ) : !account?.address ? (
                     'Connect Wallet First'
