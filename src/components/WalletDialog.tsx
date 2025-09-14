@@ -1,6 +1,6 @@
 'use client'
 
-import { CheckCircle, RefreshCw, Wallet, X } from 'lucide-react'
+import { CheckCircle, RefreshCw, Settings, Wallet, X } from 'lucide-react'
 import {
   getContract,
   prepareContractCall,
@@ -18,30 +18,32 @@ import { processPoseidonEncryption } from '@/lib/poseidon'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 interface WageGroup {
   id: string
   name: string
   yieldSource: string
+  safeWalletAddress?: string
   payees: Array<{
     email: string
     monthlyAmount: number
   }>
 }
 
-interface TopUpDialogProps {
+interface WalletDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   wageGroup: WageGroup | null
   account: Account | null
 }
 
-export function TopUpDialog({
+export function WalletDialog({
   open,
   onOpenChange,
   wageGroup,
   account,
-}: TopUpDialogProps) {
+}: WalletDialogProps) {
   const [amount, setAmount] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [showSuccess, setShowSuccess] = useState(false)
@@ -50,6 +52,7 @@ export function TopUpDialog({
     sharesReceived?: number
     encryptedTokensReceived: number
   } | null>(null)
+  const [activeTab, setActiveTab] = useState('topup')
 
   const [usdcBalance, setUsdcBalance] = useState<bigint | null>(null)
   const [balanceLoading, setBalanceLoading] = useState(false)
@@ -63,9 +66,9 @@ export function TopUpDialog({
           '@/lib/clients/thirdweb-client'
         )
         setThirdwebClient(client)
-        console.log('TopUpDialog: thirdwebClient loaded successfully')
+        console.log('WalletDialog: thirdwebClient loaded successfully')
       } catch (error) {
-        console.error('TopUpDialog: Failed to load thirdweb client:', error)
+        console.error('WalletDialog: Failed to load thirdweb client:', error)
       }
     }
     loadClient()
@@ -74,7 +77,7 @@ export function TopUpDialog({
   // Memoize the USDC contract to prevent recreation
   const usdcContract = useMemo(() => {
     if (!thirdwebClient) return null
-    console.log('TopUpDialog: Creating usdcContract')
+    console.log('WalletDialog: Creating usdcContract')
     return getContract({
       client: thirdwebClient,
       chain,
@@ -86,7 +89,7 @@ export function TopUpDialog({
   // Memoize the EERC contract
   const eercContract = useMemo(() => {
     if (!thirdwebClient) return null
-    console.log('TopUpDialog: Creating eercContract')
+    console.log('WalletDialog: Creating eercContract')
     return getContract({
       client: thirdwebClient,
       chain,
@@ -109,7 +112,7 @@ export function TopUpDialog({
 
       return wholeNumber + fractionalNumber
     } catch (error) {
-      console.error('TopUpDialog: Error formatting USDC balance:', error)
+      console.error('WalletDialog: Error formatting USDC balance:', error)
       return 0
     }
   }
@@ -117,13 +120,13 @@ export function TopUpDialog({
   // Fetch USDC balance function without timeout, matching FaucetPage
   const fetchUsdcBalance = useCallback(async () => {
     if (!account?.address || !usdcContract) {
-      console.log('TopUpDialog: No active account address or usdcContract')
+      console.log('WalletDialog: No active account address or usdcContract')
       setUsdcBalance(null)
       setBalanceError('No wallet connected')
       return
     }
 
-    console.log('TopUpDialog: Fetching USDC balance for:', account.address)
+    console.log('WalletDialog: Fetching USDC balance for:', account.address)
     setBalanceLoading(true)
     setBalanceError(null)
 
@@ -132,14 +135,14 @@ export function TopUpDialog({
         contract: usdcContract,
         address: account.address,
       })
-      console.log('TopUpDialog: Raw USDC balance fetched:', balance.toString())
+      console.log('WalletDialog: Raw USDC balance fetched:', balance.toString())
       const formatted = formatUsdcBalance(balance)
-      console.log('TopUpDialog: Formatted USDC balance:', formatted)
+      console.log('WalletDialog: Formatted USDC balance:', formatted)
 
       setUsdcBalance(balance)
       setBalanceError(null)
     } catch (error) {
-      console.error('TopUpDialog: Failed to fetch USDC balance:', error)
+      console.error('WalletDialog: Failed to fetch USDC balance:', error)
       setUsdcBalance(null)
       setBalanceError('Failed to load balance')
     } finally {
@@ -150,7 +153,7 @@ export function TopUpDialog({
   // Only fetch balance when dialog opens and account is available
   useEffect(() => {
     console.log(
-      'TopUpDialog: Dialog open state changed, open:',
+      'WalletDialog: Dialog open state changed, open:',
       open,
       'account address:',
       account?.address
@@ -158,13 +161,13 @@ export function TopUpDialog({
     if (open && account?.address) {
       // Add a small delay to ensure wallet connection is fully established
       const timer = setTimeout(() => {
-        console.log('TopUpDialog: Fetching balance after 500ms delay')
+        console.log('WalletDialog: Fetching balance after 500ms delay')
         fetchUsdcBalance()
       }, 500)
 
       return () => clearTimeout(timer)
     } else if (open && !account?.address) {
-      console.log('TopUpDialog: Opened without connected account')
+      console.log('WalletDialog: Opened without connected account')
       setBalanceError('No wallet connected')
       setUsdcBalance(null)
     }
@@ -207,12 +210,12 @@ export function TopUpDialog({
   ) => {
     if (!eercContract || !account) return null
 
-    console.log('TopUpDialog: Starting EERC deposit process...')
+    console.log('WalletDialog: Starting EERC deposit process...')
 
     // Generate keys for the user using the account directly
     const { privateKey: userPrivateKey, publicKey: derivedPublicKey } =
       await deriveKeysFromUser(account.address, account)
-    console.log('TopUpDialog: Generated keys for EERC deposit')
+    console.log('WalletDialog: Generated keys for EERC deposit')
 
     // Generate amountPCT for auditing
     const depositAmountBigInt = BigInt(depositAmount.toString())
@@ -233,10 +236,10 @@ export function TopUpDialog({
         amountNonce, // Final element is the nonce
       ] as [bigint, bigint, bigint, bigint, bigint, bigint, bigint]
 
-    console.log('TopUpDialog: Generated amountPCT for EERC deposit')
+    console.log('WalletDialog: Generated amountPCT for EERC deposit')
 
     // Approve EERC contract to spend tokens
-    console.log('TopUpDialog: Approving EERC contract to spend tokens...')
+    console.log('WalletDialog: Approving EERC contract to spend tokens...')
     const approveEERCTransaction = approve({
       contract: tokenToDeposit,
       spender: CONTRACT_ADDRESSES.EERC,
@@ -247,7 +250,7 @@ export function TopUpDialog({
       transaction: approveEERCTransaction,
       account: account,
     })
-    console.log('TopUpDialog: EERC approval successful')
+    console.log('WalletDialog: EERC approval successful')
 
     // Get encrypted balance before deposit
     let balanceBeforeDeposit = 0n
@@ -272,15 +275,17 @@ export function TopUpDialog({
         encryptedBalance
       )
       console.log(
-        'TopUpDialog: Balance before EERC deposit:',
+        'WalletDialog: Balance before EERC deposit:',
         balanceBeforeDeposit.toString()
       )
     } catch (error) {
-      console.log('TopUpDialog: No existing EERC balance found (first deposit)')
+      console.log(
+        'WalletDialog: No existing EERC balance found (first deposit)'
+      )
     }
 
     // Deposit into EERC contract
-    console.log('TopUpDialog: Depositing into EERC contract...')
+    console.log('WalletDialog: Depositing into EERC contract...')
     const eercDepositTransaction = prepareContractCall({
       contract: eercContract,
       method: 'deposit',
@@ -291,7 +296,7 @@ export function TopUpDialog({
       transaction: eercDepositTransaction,
       account: account,
     })
-    console.log('TopUpDialog: EERC deposit successful')
+    console.log('WalletDialog: EERC deposit successful')
 
     // Get encrypted balance after deposit to calculate received tokens
     let balanceAfterDeposit = 0n
@@ -319,19 +324,19 @@ export function TopUpDialog({
         encryptedBalance
       )
       console.log(
-        'TopUpDialog: Balance after EERC deposit:',
+        'WalletDialog: Balance after EERC deposit:',
         balanceAfterDeposit.toString()
       )
     } catch (error) {
       console.error(
-        'TopUpDialog: Error getting balance after EERC deposit:',
+        'WalletDialog: Error getting balance after EERC deposit:',
         error
       )
     }
 
     const encryptedTokensReceived = balanceAfterDeposit - balanceBeforeDeposit
     console.log(
-      'TopUpDialog: Encrypted tokens received:',
+      'WalletDialog: Encrypted tokens received:',
       encryptedTokensReceived.toString()
     )
 
@@ -356,7 +361,7 @@ export function TopUpDialog({
 
       if (wageGroup.yieldSource === 'none' || !wageGroup.yieldSource) {
         // Direct USDC deposit into EERC
-        console.log('TopUpDialog: Direct USDC to EERC deposit')
+        console.log('WalletDialog: Direct USDC to EERC deposit')
 
         encryptedTokensReceived =
           (await depositIntoEERC(
@@ -373,7 +378,7 @@ export function TopUpDialog({
           return
         }
 
-        console.log('TopUpDialog: Vault address:', vaultAddress)
+        console.log('WalletDialog: Vault address:', vaultAddress)
 
         // Create vault contract
         const vaultContract = getContract({
@@ -402,7 +407,7 @@ export function TopUpDialog({
           account: account,
         })
         console.log(
-          'TopUpDialog: Vault approval successful:',
+          'WalletDialog: Vault approval successful:',
           approvalTransactionReceipt
         )
 
@@ -418,7 +423,7 @@ export function TopUpDialog({
           account: account,
         })
         console.log(
-          'TopUpDialog: Vault deposit successful:',
+          'WalletDialog: Vault deposit successful:',
           depositTransactionReceipt
         )
 
@@ -431,10 +436,10 @@ export function TopUpDialog({
 
         const sharesReceivedBigInt = sharesAfter - sharesBefore
         sharesReceived = Number(sharesReceivedBigInt) / 1e6 // Assuming 6 decimals for vault shares
-        console.log('TopUpDialog: Shares received:', sharesReceived)
+        console.log('WalletDialog: Shares received:', sharesReceived)
 
         // Step 3: Deposit vault shares into EERC
-        console.log('TopUpDialog: Depositing vault shares into EERC...')
+        console.log('WalletDialog: Depositing vault shares into EERC...')
 
         encryptedTokensReceived =
           (await depositIntoEERC(
@@ -469,7 +474,7 @@ export function TopUpDialog({
         onOpenChange(false)
       }, 3000) // Increased timeout to show more details
     } catch (error) {
-      console.error('TopUpDialog: Error during top-up:', error)
+      console.error('WalletDialog: Error during top-up:', error)
       // TODO: Add proper error handling/toast notification
     } finally {
       setIsLoading(false)
@@ -481,8 +486,12 @@ export function TopUpDialog({
       setBalanceError('No wallet connected')
       return
     }
-    console.log('TopUpDialog: Manual balance refresh triggered')
+    console.log('WalletDialog: Manual balance refresh triggered')
     fetchUsdcBalance()
+  }
+
+  const handleGoToSettings = () => {
+    setActiveTab('settings')
   }
 
   // Reset states when dialog closes
@@ -491,6 +500,7 @@ export function TopUpDialog({
       setShowSuccess(false)
       setSuccessData(null)
       setAmount('')
+      setActiveTab('topup')
       // Reset balance state when dialog closes to prevent stale data
       setUsdcBalance(null)
       setBalanceError(null)
@@ -507,9 +517,11 @@ export function TopUpDialog({
     { months: 6, amount: monthlyTotal * 6 },
   ]
 
+  const hasWallet = Boolean(wageGroup.safeWalletAddress)
+
   return (
-    <div className="fixed inset-0 backdrop-blur-md bg-white/30 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg max-w-md w-full mx-4 relative border border-purple-100/50 shadow-2xl">
+    <div className="fixed top-[0.01%] bottom-[0.01%] left-0 right-0 backdrop-blur-md bg-white/30 flex items-center justify-center z-50 p-4 overflow-hidden">
+      <div className="bg-white rounded-lg max-w-md w-full mx-4 relative border border-purple-100/50 shadow-2xl h-full max-h-[800px] flex flex-col">
         {/* Close button */}
         <Button
           variant="ghost"
@@ -522,7 +534,7 @@ export function TopUpDialog({
 
         {showSuccess ? (
           // Success State
-          <div className="flex flex-col items-center justify-center min-h-[400px] px-6">
+          <div className="flex flex-col items-center justify-center flex-1 px-6">
             <div className="bg-gradient-to-r from-green-400 to-emerald-500 rounded-full p-4 mb-6 shadow-lg">
               <CheckCircle className="w-12 h-12 text-white" />
             </div>
@@ -557,149 +569,210 @@ export function TopUpDialog({
         ) : (
           <>
             {/* Header */}
-            <div className="bg-gradient-to-r from-purple-100 to-violet-100 border-b border-purple-200 rounded-t-lg p-6 pr-12">
+            <div className="bg-gradient-to-r from-purple-100 to-violet-100 border-b border-purple-200 rounded-t-lg p-6 pr-12 flex-shrink-0">
               <div className="mx-auto bg-gradient-to-r from-purple-500 to-purple-600 rounded-full p-3 w-fit mb-4">
                 <Wallet className="h-6 w-6 text-white" />
               </div>
               <h2 className="text-2xl font-semibold text-purple-900 text-center">
-                Add Funds to {wageGroup.name}
+                Wallet for {wageGroup.name}
               </h2>
               <p className="text-purple-600/70 text-center mt-2">
-                Top up your payment group account with USDC
-                {wageGroup.yieldSource !== 'none' &&
-                  wageGroup.yieldSource &&
-                  ` via ${wageGroup.yieldSource} yield vault`}
+                Manage your payment group wallet
               </p>
             </div>
 
-            {/* Content */}
-            <div className="p-6">
-              <div className="space-y-6">
-                {/* Monthly Total Info */}
-                <div className="bg-purple-50/50 rounded-lg p-4 text-center">
-                  <p className="text-sm text-purple-600 mb-1">
-                    Monthly Payment Total
-                  </p>
-                  <p className="text-2xl font-bold text-purple-900">
-                    {monthlyTotal.toFixed(2)} USDC
-                  </p>
-                  <p className="text-xs text-purple-500 mt-1">
-                    {wageGroup.payees.length} team member
-                    {wageGroup.payees.length !== 1 ? 's' : ''}
-                  </p>
-                </div>
+            {/* Content with Tabs */}
+            <div className="p-6 flex-1 flex flex-col overflow-hidden">
+              <Tabs
+                value={activeTab}
+                onValueChange={setActiveTab}
+                className="flex flex-col h-full"
+              >
+                <TabsList className="grid w-full grid-cols-2 mb-6 flex-shrink-0">
+                  <TabsTrigger value="topup" className="text-sm">
+                    Top Up
+                  </TabsTrigger>
+                  <TabsTrigger value="settings" className="text-sm">
+                    Settings
+                  </TabsTrigger>
+                </TabsList>
 
-                {/* Amount Input */}
-                <div className="space-y-2">
-                  <Label
-                    htmlFor="amount"
-                    className="text-purple-700 font-medium"
+                <div className="flex-1 overflow-auto">
+                  <TabsContent value="topup" className="space-y-6 m-0">
+                    {!hasWallet ? (
+                      // No wallet setup yet
+                      <div className="text-center py-8">
+                        <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                          <Settings className="h-8 w-8 text-orange-600" />
+                        </div>
+                        <h3 className="text-lg font-medium text-gray-900 mb-2">
+                          Set up wallet first
+                        </h3>
+                        <p className="text-gray-500 mb-6">
+                          You need to configure your wallet before you can add
+                          funds.
+                        </p>
+                        <Button
+                          onClick={handleGoToSettings}
+                          className="bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700"
+                        >
+                          Go to Settings
+                        </Button>
+                      </div>
+                    ) : (
+                      // Rest of your topup content...
+                      <>
+                        {/* Monthly Total Info */}
+                        <div className="bg-purple-50/50 rounded-lg p-4 text-center">
+                          <p className="text-sm text-purple-600 mb-1">
+                            Monthly Payment Total
+                          </p>
+                          <p className="text-2xl font-bold text-purple-900">
+                            {monthlyTotal.toFixed(2)} USDC
+                          </p>
+                          <p className="text-xs text-purple-500 mt-1">
+                            {wageGroup.payees.length} team member
+                            {wageGroup.payees.length !== 1 ? 's' : ''}
+                          </p>
+                        </div>
+
+                        {/* Amount Input */}
+                        <div className="space-y-2">
+                          <Label
+                            htmlFor="amount"
+                            className="text-purple-700 font-medium"
+                          >
+                            Top Up Amount
+                          </Label>
+                          <Input
+                            id="amount"
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={amount}
+                            onChange={(e) => setAmount(e.target.value)}
+                            placeholder="Enter amount..."
+                            className="border-purple-200 focus:border-purple-400 focus:ring-purple-400 text-lg"
+                          />
+
+                          {/* Wallet Balance Display with improved error handling */}
+                          <div className="flex items-center justify-between text-sm text-purple-600 mt-2">
+                            <div className="flex items-center gap-2">
+                              <Wallet className="h-4 w-4 text-purple-500" />
+                              <span>
+                                Wallet Balance:{' '}
+                                {balanceLoading ? (
+                                  <span className="text-purple-500">
+                                    Loading...
+                                  </span>
+                                ) : balanceError ? (
+                                  <span className="text-red-500 text-xs">
+                                    {balanceError}
+                                  </span>
+                                ) : account?.address ? (
+                                  `${formattedBalance} USDC`
+                                ) : (
+                                  <span className="text-orange-500">
+                                    No wallet connected
+                                  </span>
+                                )}
+                              </span>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={handleRefreshBalance}
+                              disabled={balanceLoading}
+                              className="h-6 w-6 p-0 text-purple-500 hover:text-purple-600"
+                              title={
+                                balanceError || !account?.address
+                                  ? 'Check wallet connection'
+                                  : 'Refresh balance'
+                              }
+                            >
+                              <RefreshCw
+                                className={`h-3 w-3 ${balanceLoading ? 'animate-spin' : ''}`}
+                              />
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* Quick Amount Buttons */}
+                        <div className="space-y-2">
+                          <Label className="text-purple-700 font-medium text-sm">
+                            Quick Amounts
+                          </Label>
+                          <div className="grid grid-cols-2 gap-2">
+                            {suggestedAmounts.map((suggestion, index) => (
+                              <Button
+                                key={index}
+                                variant="outline"
+                                size="sm"
+                                onClick={() =>
+                                  setAmount(suggestion.amount.toString())
+                                }
+                                className="border-purple-200 text-purple-700 hover:text-purple-800 hover:bg-purple-50 hover:border-purple-300"
+                                disabled={isLoading}
+                              >
+                                {suggestion.amount.toFixed(0)} USDC
+                                <span className="text-xs ml-1">
+                                  ({suggestion.months} month
+                                  {suggestion.months !== 1 ? 's' : ''})
+                                </span>
+                              </Button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Action button */}
+                        <div className="mt-6">
+                          <Button
+                            onClick={handleTopUp}
+                            disabled={
+                              isLoading ||
+                              !amount ||
+                              parseFloat(amount) <= 0 ||
+                              !account?.address
+                            }
+                            className="bg-gradient-to-r w-full from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white disabled:opacity-50"
+                          >
+                            {isLoading ? (
+                              <>
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                                {wageGroup.yieldSource !== 'none' &&
+                                wageGroup.yieldSource
+                                  ? 'Processing via Yield Vault & Encryption...'
+                                  : 'Processing Encrypted Deposit...'}
+                              </>
+                            ) : !account?.address ? (
+                              'Connect Wallet First'
+                            ) : (
+                              `Add ${amount || '0'} USDC`
+                            )}
+                          </Button>
+                        </div>
+                      </>
+                    )}
+                  </TabsContent>
+
+                  <TabsContent
+                    value="settings"
+                    className="flex flex-col justify-center items-center h-full m-0"
                   >
-                    Top Up Amount
-                  </Label>
-                  <Input
-                    id="amount"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    placeholder="Enter amount..."
-                    className="border-purple-200 focus:border-purple-400 focus:ring-purple-400 text-lg"
-                  />
-
-                  {/* Wallet Balance Display with improved error handling */}
-                  <div className="flex items-center justify-between text-sm text-purple-600 mt-2">
-                    <div className="flex items-center gap-2">
-                      <Wallet className="h-4 w-4 text-purple-500" />
-                      <span>
-                        Wallet Balance:{' '}
-                        {balanceLoading ? (
-                          <span className="text-purple-500">Loading...</span>
-                        ) : balanceError ? (
-                          <span className="text-red-500 text-xs">
-                            {balanceError}
-                          </span>
-                        ) : account?.address ? (
-                          `${formattedBalance} USDC`
-                        ) : (
-                          <span className="text-orange-500">
-                            No wallet connected
-                          </span>
-                        )}
-                      </span>
+                    <div className="text-center">
+                      <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Settings className="h-8 w-8 text-purple-600" />
+                      </div>
+                      <h3 className="text-lg font-medium text-gray-900 mb-2">
+                        Settings
+                      </h3>
+                      <p className="text-gray-500">
+                        Wallet settings will be available here soon.
+                      </p>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={handleRefreshBalance}
-                      disabled={balanceLoading}
-                      className="h-6 w-6 p-0 text-purple-500 hover:text-purple-600"
-                      title={
-                        balanceError || !account?.address
-                          ? 'Check wallet connection'
-                          : 'Refresh balance'
-                      }
-                    >
-                      <RefreshCw
-                        className={`h-3 w-3 ${balanceLoading ? 'animate-spin' : ''}`}
-                      />
-                    </Button>
-                  </div>
+                  </TabsContent>
                 </div>
-
-                {/* Quick Amount Buttons */}
-                <div className="space-y-2">
-                  <Label className="text-purple-700 font-medium text-sm">
-                    Quick Amounts
-                  </Label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {suggestedAmounts.map((suggestion, index) => (
-                      <Button
-                        key={index}
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setAmount(suggestion.amount.toString())}
-                        className="border-purple-200 text-purple-700 hover:text-purple-800 hover:bg-purple-50 hover:border-purple-300"
-                        disabled={isLoading}
-                      >
-                        {suggestion.amount.toFixed(0)} USDC
-                        <span className="text-xs ml-1">
-                          ({suggestion.months} month
-                          {suggestion.months !== 1 ? 's' : ''})
-                        </span>
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Action button */}
-              <div className="mt-6">
-                <Button
-                  onClick={handleTopUp}
-                  disabled={
-                    isLoading ||
-                    !amount ||
-                    parseFloat(amount) <= 0 ||
-                    !account?.address
-                  }
-                  className="bg-gradient-to-r w-full from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white disabled:opacity-50"
-                >
-                  {isLoading ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                      {wageGroup.yieldSource !== 'none' && wageGroup.yieldSource
-                        ? 'Processing via Yield Vault & Encryption...'
-                        : 'Processing Encrypted Deposit...'}
-                    </>
-                  ) : !account?.address ? (
-                    'Connect Wallet First'
-                  ) : (
-                    `Add ${amount || '0'} USDC`
-                  )}
-                </Button>
-              </div>
+              </Tabs>
             </div>
           </>
         )}

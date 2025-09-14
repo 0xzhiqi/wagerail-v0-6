@@ -43,7 +43,7 @@ model WageGroup {
   startDate         DateTime
   paymentDate       Int         // Day of month (1-28)
   yieldSource       YieldSource @default(NONE)
-  safeWalletAddress String
+  safeWalletAddress String?
   eercRegistered    Boolean     @default(false)
   isActive          Boolean     @default(false)
 

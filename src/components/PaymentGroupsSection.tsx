@@ -1,6 +1,6 @@
 'use client'
 
-import { BanknoteArrowUp, Group, Plus, Power } from 'lucide-react'
+import { BanknoteArrowUp, Group, Plus, Power, Wallet } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
@@ -12,6 +12,7 @@ interface WageGroup {
   yieldSource: string
   eercRegistered: boolean
   isActive: boolean
+  safeWalletAddress?: string
   payees: Array<{
     email: string
     monthlyAmount: number
@@ -24,7 +25,7 @@ interface PaymentGroupsSectionProps {
   loadingWageGroups: boolean
   onCreateClick: () => void
   onStatusToggleClick: (group: WageGroup) => void
-  onTopUpClick: (group: WageGroup) => void
+  onWalletClick: (group: WageGroup) => void
 }
 
 export function PaymentGroupsSection({
@@ -33,7 +34,7 @@ export function PaymentGroupsSection({
   loadingWageGroups,
   onCreateClick,
   onStatusToggleClick,
-  onTopUpClick,
+  onWalletClick,
 }: PaymentGroupsSectionProps) {
   return (
     <Card className="mb-8">
@@ -242,7 +243,7 @@ export function PaymentGroupsSection({
                   </div>
 
                   {/* Right Side - Summary & Action */}
-                  <div className="ml-6 text-right space-y-4">
+                  <div className="ml-6 text-right space-y-4 flex flex-col items-end">
                     {/* Summary Card */}
                     <div className="relative bg-gradient-to-br from-purple-100/60 via-violet-100/50 to-indigo-100/40 rounded-xl p-5 shadow-lg min-w-[180px] border border-purple-200/50">
                       {/* Subtle decorative elements */}
@@ -301,32 +302,18 @@ export function PaymentGroupsSection({
                       <div className="absolute inset-0 bg-gradient-to-br from-purple-100/20 to-transparent rounded-xl pointer-events-none"></div>
                     </div>
 
-                    {/* Enhanced Top Up Button */}
+                    {/* Enhanced Wallet Button - Right aligned */}
                     <button
-                      className="group/btn relative w-full bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 text-white font-semibold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 overflow-hidden"
-                      onClick={() => onTopUpClick(group)}
+                      className="group/btn relative w-12 h-12 bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 overflow-hidden flex items-center justify-center"
+                      onClick={() => onWalletClick(group)}
                     >
                       {/* Animated background effect */}
                       <div className="absolute inset-0 bg-gradient-to-r from-purple-400 to-violet-400 opacity-0 group-hover/btn:opacity-100 transition-opacity duration-300"></div>
 
-                      {/* Button content */}
-                      <div className="relative flex items-center justify-center space-x-2">
-                        <svg
-                          className="w-5 h-5 group-hover/btn:scale-110 transition-transform duration-200"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M12 6v6m0 0v6m0-6h6m-6 0H6"
-                          />
-                        </svg>
-                        <span className="text-sm font-bold">Add Funds</span>
-                      </div>
+                      {/* Icon */}
+                      <Wallet className="relative w-5 h-5 group-hover/btn:scale-110 transition-transform duration-200 z-10" />
 
+                      {/* Shimmer effect */}
                       <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -skew-x-12 translate-x-[-100%] group-hover/btn:translate-x-[100%] transition-transform duration-1000"></div>
                     </button>
                   </div>

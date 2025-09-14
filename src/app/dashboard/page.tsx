@@ -23,8 +23,8 @@ import {
 import { EditNameDialog } from '@/components/EditNameDialog'
 import { PaymentGroupsSection } from '@/components/PaymentGroupsSection'
 import { ProfileSection } from '@/components/ProfileSection'
-import { TopUpDialog } from '@/components/TopUpDialog'
 import { WageGroupCreateDialog } from '@/components/WageGroupCreateDialog'
+import { WalletDialog } from '@/components/WalletDialog'
 import { checkAuthStatus, logoutUser } from '@/actions/auth'
 import { createWageGroup, updateWageGroupStatus } from '@/actions/wage-group'
 
@@ -36,6 +36,7 @@ interface WageGroup {
   yieldSource: string
   eercRegistered: boolean
   isActive: boolean
+  safeWalletAddress?: string
   payees: Array<{
     email: string
     monthlyAmount: number
@@ -53,7 +54,7 @@ export default function DashboardPage() {
   const [wageGroups, setWageGroups] = useState<WageGroup[]>([])
   const [loadingWageGroups, setLoadingWageGroups] = useState(false)
   const [showCreateDialog, setShowCreateDialog] = useState(false)
-  const [showTopUpDialog, setShowTopUpDialog] = useState(false)
+  const [showWalletDialog, setShowWalletDialog] = useState(false)
   const [showStatusDialog, setShowStatusDialog] = useState(false)
   const [showLogoutDialog, setShowLogoutDialog] = useState(false)
   const [showEditNameDialog, setShowEditNameDialog] = useState(false)
@@ -303,9 +304,9 @@ export default function DashboardPage() {
     setShowStatusDialog(true)
   }
 
-  const handleTopUpClick = (group: WageGroup) => {
+  const handleWalletClick = (group: WageGroup) => {
     setSelectedWageGroup(group)
-    setShowTopUpDialog(true)
+    setShowWalletDialog(true)
   }
 
   const handleEditNameClick = () => {
@@ -352,7 +353,7 @@ export default function DashboardPage() {
     )
   }
 
-  // Determine the account to pass to TopUpDialog
+  // Determine the account to pass to WalletDialog
   // Only pass account if wallet reconnection is complete and account exists
   const connectedAccount =
     !isWalletLoading && walletReconnectAttempted && account?.address
@@ -427,7 +428,7 @@ export default function DashboardPage() {
           loadingWageGroups={loadingWageGroups}
           onCreateClick={handleCreateClick}
           onStatusToggleClick={handleStatusToggleClick}
-          onTopUpClick={handleTopUpClick}
+          onWalletClick={handleWalletClick}
         />
       </div>
 
@@ -439,10 +440,10 @@ export default function DashboardPage() {
         isCreating={isCreating}
       />
 
-      {/* Pass connectedAccount to TopUpDialog - only when wallet is properly connected */}
-      <TopUpDialog
-        open={showTopUpDialog}
-        onOpenChange={setShowTopUpDialog}
+      {/* Pass connectedAccount to WalletDialog - only when wallet is properly connected */}
+      <WalletDialog
+        open={showWalletDialog}
+        onOpenChange={setShowWalletDialog}
         wageGroup={selectedWageGroup}
         account={connectedAccount} // This will be null until wallet is properly connected
       />
