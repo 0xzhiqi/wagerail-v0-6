@@ -9,6 +9,13 @@ interface SendWageGroupInvitationParams {
   monthlyAmount: number
 }
 
+interface SendWalletOwnerInvitationParams {
+  recipientEmail: string
+  inviterName: string
+  wageGroupName: string
+  inviterEmail: string
+}
+
 export async function sendWageGroupInvitation({
   recipientEmail,
   inviterName,
@@ -240,6 +247,149 @@ export async function sendWageGroupUpdateNotification({
   } catch (error) {
     console.error('Error sending update email:', error)
     console.error('Error details:', JSON.stringify(error, null, 2))
+    return { success: false, error: error }
+  }
+}
+
+export async function sendWalletOwnerInvitation({
+  recipientEmail,
+  inviterName,
+  wageGroupName,
+  inviterEmail,
+}: SendWalletOwnerInvitationParams) {
+  const subject = `You've been invited as a wallet owner for ${wageGroupName}`
+
+  const htmlBody = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Wallet Owner Invitation</title>
+            <style>
+                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                .header { background-color: #f3e8ff; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+                .content { padding: 20px 0; }
+                .button { 
+                    display: inline-block; 
+                    background-color: #8b5cf6; 
+                    color: #ffffff !important; 
+                    padding: 12px 24px; 
+                    text-decoration: none; 
+                    border-radius: 5px; 
+                    margin: 20px 0;
+                    font-weight: bold;
+                    border: none;
+                }
+                .info-box {
+                    background-color: #f8fafc;
+                    border-left: 4px solid #8b5cf6;
+                    padding: 16px;
+                    margin: 20px 0;
+                    border-radius: 4px;
+                }
+                .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; font-size: 14px; color: #666; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>🔐 You've been invited as a wallet owner!</h1>
+                </div>
+                
+                <div class="content">
+                    <p>Hello!</p>
+                    
+                    <p><strong>${inviterName}</strong> (${inviterEmail}) has invited you to become a co-owner of the multi-signature wallet for the <strong>"${wageGroupName}"</strong> wage group.</p>
+                    
+                    <div class="info-box">
+                        <h3 style="margin-top: 0; color: #8b5cf6;">What does this mean?</h3>
+                        <p>As a wallet owner, you will have the ability to approve transactions from the shared wage group wallet. This is a multi-signature setup, which means multiple owners must approve transactions for enhanced security.</p>
+                    </div>
+                    
+                    <p><strong>Next Steps:</strong></p>
+                    <ol>
+                        <li>Create an account on our platform using this email address (${recipientEmail})</li>
+                        <li>Complete the wallet owner verification process</li>
+                        <li>Start approving transactions for the wage group</li>
+                    </ol>
+                    
+                    <p>To get started, please create your account:</p>
+                    
+                    <a href="https://volonly.com" class="button" style="color: #ffffff !important;">Create Account & Accept Invitation</a>
+                    
+                    <p>Once you create an account with this email address, you'll automatically see the pending wallet owner invitation and can accept it to join as a co-owner.</p>
+                    
+                    <p>If you have any questions about this invitation or the wallet responsibilities, please contact <strong>${inviterName}</strong> at ${inviterEmail}.</p>
+                </div>
+                
+                <div class="footer">
+                    <p>This email was sent from Volonly wage management system.</p>
+                    <p>If you believe you received this email in error, please ignore it or contact the sender directly.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+    `
+
+  const textBody = `
+        You've been invited as a wallet owner!
+        
+        ${inviterName} (${inviterEmail}) has invited you to become a co-owner of the multi-signature wallet for the "${wageGroupName}" wage group.
+        
+        What does this mean?
+        As a wallet owner, you will have the ability to approve transactions from the shared wage group wallet. This is a multi-signature setup, which means multiple owners must approve transactions for enhanced security.
+        
+        Next Steps:
+        1. Create an account on our platform using this email address (${recipientEmail})
+        2. Complete the wallet owner verification process
+        3. Start approving transactions for the wage group
+        
+        To get started, please visit: https://volonly.com
+        
+        Once you create an account with this email address, you'll automatically see the pending wallet owner invitation and can accept it to join as a co-owner.
+        
+        If you have any questions about this invitation or the wallet responsibilities, please contact ${inviterName} at ${inviterEmail}.
+        
+        ---
+        This email was sent from Volonly wage management system.
+        If you believe you received this email in error, please ignore it or contact the sender directly.
+    `
+
+  const command = new SendEmailCommand({
+    Source: process.env.AWS_SES_FROM_EMAIL!,
+    Destination: {
+      ToAddresses: [recipientEmail],
+    },
+    Message: {
+      Subject: {
+        Data: subject,
+        Charset: 'UTF-8',
+      },
+      Body: {
+        Html: {
+          Data: htmlBody,
+          Charset: 'UTF-8',
+        },
+        Text: {
+          Data: textBody,
+          Charset: 'UTF-8',
+        },
+      },
+    },
+  })
+
+  try {
+    console.log(
+      'Attempting to send wallet owner invitation to:',
+      recipientEmail
+    )
+    const result = await awsSesClient.send(command)
+    console.log('Wallet owner invitation sent successfully:', result.MessageId)
+    return { success: true, messageId: result.MessageId }
+  } catch (error) {
+    console.error('Error sending wallet owner invitation:', error)
     return { success: false, error: error }
   }
 }

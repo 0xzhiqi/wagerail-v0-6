@@ -105,7 +105,7 @@ export async function createWageGroup(formData: any) {
     console.log('Validated data:', validatedData)
 
     // Generate a mock safe wallet address (in production, this would be created via smart contract)
-    const safeWalletAddress = `0x${Math.random().toString(16).substring(2, 42).padStart(40, '0')}`
+    // const safeWalletAddress = `0x${Math.random().toString(16).substring(2, 42).padStart(40, '0')}`
 
     // Create wage group in database
     const wageGroup = await prisma.wageGroup.create({
@@ -114,7 +114,7 @@ export async function createWageGroup(formData: any) {
         startDate: new Date(validatedData.startDate),
         paymentDate: validatedData.paymentDate,
         yieldSource: mapYieldSource(validatedData.yieldSource),
-        safeWalletAddress,
+        // safeWalletAddress,
         creatorId: auth.user!.id,
         payees: {
           create: validatedData.payees.map((payee) => ({

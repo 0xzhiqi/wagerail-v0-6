@@ -1,6 +1,18 @@
 'use client'
 
-import { CheckCircle, RefreshCw, Settings, Wallet, X } from 'lucide-react'
+import {
+  CheckCircle,
+  CheckCircle2,
+  Clock,
+  Minus,
+  Plus,
+  RefreshCw,
+  Settings,
+  Shield,
+  User,
+  Wallet,
+  X,
+} from 'lucide-react'
 import {
   getContract,
   prepareContractCall,
@@ -16,6 +28,7 @@ import { deriveKeysFromUser, getDecryptedBalance } from '@/lib/crypto-utils'
 import { chain } from '@/lib/environment/get-chain'
 import { processPoseidonEncryption } from '@/lib/poseidon'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -29,6 +42,21 @@ interface WageGroup {
     email: string
     monthlyAmount: number
   }>
+}
+
+interface WalletData {
+  owners: Array<{
+    email: string
+    accepted: boolean
+    isCurrentUser: boolean
+    userId?: string
+  }>
+  pendingInvites: Array<{
+    email: string
+    accepted: boolean
+  }>
+  threshold: number | null
+  safeWalletAddress: string | null
 }
 
 interface WalletDialogProps {
@@ -52,12 +80,21 @@ export function WalletDialog({
     sharesReceived?: number
     encryptedTokensReceived: number
   } | null>(null)
+  const [walletSuccessMessage, setWalletSuccessMessage] = useState('')
   const [activeTab, setActiveTab] = useState('topup')
 
   const [usdcBalance, setUsdcBalance] = useState<bigint | null>(null)
   const [balanceLoading, setBalanceLoading] = useState(false)
   const [balanceError, setBalanceError] = useState<string | null>(null)
   const [thirdwebClient, setThirdwebClient] = useState<any>(null)
+
+  // Wallet settings state
+  const [includeSelf, setIncludeSelf] = useState(true)
+  const [ownerEmails, setOwnerEmails] = useState<string[]>([''])
+  const [threshold, setThreshold] = useState(1)
+  const [isCreatingWallet, setIsCreatingWallet] = useState(false)
+  const [walletData, setWalletData] = useState<WalletData | null>(null)
+  const [isLoadingWalletData, setIsLoadingWalletData] = useState(false)
 
   useEffect(() => {
     const loadClient = async () => {
@@ -73,6 +110,51 @@ export function WalletDialog({
     }
     loadClient()
   }, [])
+
+  // Fetch wallet data when settings tab is opened
+  useEffect(() => {
+    if (open && activeTab === 'settings' && wageGroup?.id) {
+      fetchWalletData()
+    }
+  }, [open, activeTab, wageGroup?.id])
+
+  // Fetch wallet data when switching to topup tab to ensure fresh data
+  useEffect(() => {
+    if (open && activeTab === 'topup' && wageGroup?.id) {
+      fetchWalletData()
+    }
+  }, [open, activeTab, wageGroup?.id])
+
+  // Calculate total owners and update threshold if it exceeds maximum
+  useEffect(() => {
+    const validEmails = ownerEmails.filter((email) => email.trim() !== '')
+    const totalOwners = (includeSelf ? 1 : 0) + validEmails.length
+    const maxThreshold = Math.max(1, totalOwners)
+
+    // Only update threshold if it exceeds the new maximum
+    if (threshold > maxThreshold) {
+      setThreshold(maxThreshold)
+    }
+  }, [includeSelf, ownerEmails, threshold])
+
+  const fetchWalletData = async () => {
+    if (!wageGroup?.id) return
+
+    setIsLoadingWalletData(true)
+    try {
+      const response = await fetch(`/api/wallet?wageGroupId=${wageGroup.id}`)
+      if (response.ok) {
+        const result = await response.json()
+        if (result.success) {
+          setWalletData(result.data)
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching wallet data:', error)
+    } finally {
+      setIsLoadingWalletData(false)
+    }
+  }
 
   // Memoize the USDC contract to prevent recreation
   const usdcContract = useMemo(() => {
@@ -199,6 +281,106 @@ export function WalletDialog({
         return CONTRACT_ADDRESSES.VAULTS['mev-capital']
       default:
         return null
+    }
+  }
+
+  // Wallet settings functions
+  const addOwnerEmail = () => {
+    setOwnerEmails([...ownerEmails, ''])
+  }
+
+  const removeOwnerEmail = (index: number) => {
+    if (ownerEmails.length > 1) {
+      setOwnerEmails(ownerEmails.filter((_, i) => i !== index))
+    }
+  }
+
+  const updateOwnerEmail = (index: number, value: string) => {
+    const updated = [...ownerEmails]
+    updated[index] = value
+    setOwnerEmails(updated)
+  }
+
+  const getTotalOwners = () => {
+    const validEmails = ownerEmails.filter((email) => email.trim() !== '')
+    return (includeSelf ? 1 : 0) + validEmails.length
+  }
+
+  const getMaxThreshold = () => {
+    return Math.max(1, getTotalOwners())
+  }
+
+  const validateWalletForm = () => {
+    const totalOwners = getTotalOwners()
+    if (totalOwners === 0) return false
+    if (threshold < 1 || threshold > totalOwners) return false
+
+    // Check for duplicate emails
+    const validEmails = ownerEmails.filter((email) => email.trim() !== '')
+    const uniqueEmails = new Set(validEmails)
+    if (validEmails.length !== uniqueEmails.size) return false
+
+    return true
+  }
+
+  const handleCreateWallet = async () => {
+    if (!validateWalletForm() || !wageGroup?.id) return
+
+    setIsCreatingWallet(true)
+    try {
+      const response = await fetch('/api/wallet', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          wageGroupId: wageGroup.id,
+          includeSelf,
+          ownerEmails: ownerEmails.filter((email) => email.trim() !== ''),
+          threshold,
+        }),
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        // Reset form
+        setIncludeSelf(true)
+        setOwnerEmails([''])
+        setThreshold(1)
+
+        // Refresh wallet data
+        await fetchWalletData()
+
+        // Determine success message based on wallet creation type
+        const totalOwners = getTotalOwners()
+        if (totalOwners === 1) {
+          setWalletSuccessMessage('Wage Group Wallet Created')
+        } else {
+          setWalletSuccessMessage('Wage Group Wallet Initiated')
+        }
+
+        // Show success message briefly
+        setShowSuccess(true)
+        setTimeout(() => setShowSuccess(false), 2000)
+
+        // Automatically route to Top Up page after wallet creation
+        setTimeout(() => {
+          setActiveTab('topup')
+          // Force a data refresh when switching to topup tab
+          if (wageGroup?.id) {
+            fetchWalletData()
+          }
+        }, 2000)
+      } else {
+        console.error('Failed to create wallet:', result.error)
+        // TODO: Add error handling/toast notification
+      }
+    } catch (error) {
+      console.error('Error creating wallet:', error)
+      // TODO: Add error handling/toast notification
+    } finally {
+      setIsCreatingWallet(false)
     }
   }
 
@@ -449,12 +631,13 @@ export function WalletDialog({
           )) || 0
       }
 
-      // Store success data
+      // Store success data for top-up
       setSuccessData({
         usdcDeposited: parseFloat(amount),
         sharesReceived,
         encryptedTokensReceived,
       })
+      setWalletSuccessMessage('') // Clear wallet success message for top-up
 
       // Show success state
       setShowSuccess(true)
@@ -499,11 +682,16 @@ export function WalletDialog({
     if (!open) {
       setShowSuccess(false)
       setSuccessData(null)
+      setWalletSuccessMessage('')
       setAmount('')
       setActiveTab('topup')
       // Reset balance state when dialog closes to prevent stale data
       setUsdcBalance(null)
       setBalanceError(null)
+      // Reset settings form
+      setIncludeSelf(true)
+      setOwnerEmails([''])
+      setThreshold(1)
     }
   }, [open])
 
@@ -517,7 +705,9 @@ export function WalletDialog({
     { months: 6, amount: monthlyTotal * 6 },
   ]
 
-  const hasWallet = Boolean(wageGroup.safeWalletAddress)
+  const hasWallet = Boolean(
+    wageGroup.safeWalletAddress || walletData?.safeWalletAddress
+  )
 
   return (
     <div className="fixed top-[0.01%] bottom-[0.01%] left-0 right-0 backdrop-blur-md bg-white/30 flex items-center justify-center z-50 p-4 overflow-hidden">
@@ -539,7 +729,7 @@ export function WalletDialog({
               <CheckCircle className="w-12 h-12 text-white" />
             </div>
             <h3 className="text-2xl font-semibold text-purple-900 mb-4 text-center">
-              Successfully Added Funds!
+              {walletSuccessMessage || 'Successfully Added Funds!'}
             </h3>
             {successData && (
               <div className="text-center space-y-2">
@@ -620,7 +810,7 @@ export function WalletDialog({
                         </Button>
                       </div>
                     ) : (
-                      // Rest of your topup content...
+                      // Rest of topup content...
                       <>
                         {/* Monthly Total Info */}
                         <div className="bg-purple-50/50 rounded-lg p-4 text-center">
@@ -755,21 +945,248 @@ export function WalletDialog({
                     )}
                   </TabsContent>
 
-                  <TabsContent
-                    value="settings"
-                    className="flex flex-col justify-center items-center h-full m-0"
-                  >
-                    <div className="text-center">
-                      <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <Settings className="h-8 w-8 text-purple-600" />
+                  <TabsContent value="settings" className="space-y-6 m-0">
+                    {isLoadingWalletData ? (
+                      <div className="flex items-center justify-center py-8">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
                       </div>
-                      <h3 className="text-lg font-medium text-gray-900 mb-2">
-                        Settings
-                      </h3>
-                      <p className="text-gray-500">
-                        Wallet settings will be available here soon.
-                      </p>
-                    </div>
+                    ) : hasWallet ? (
+                      // Wallet already exists - show current status
+                      <div className="space-y-6">
+                        {/* Wallet Status */}
+                        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                          <div className="flex items-center gap-2 mb-2">
+                            <Shield className="h-5 w-5 text-green-600" />
+                            <h3 className="font-medium text-green-800">
+                              Multi-Signature Wallet Active
+                            </h3>
+                          </div>
+                          <p className="text-sm text-green-700 mb-2">
+                            Safe Address:{' '}
+                            {wageGroup.safeWalletAddress ||
+                              walletData?.safeWalletAddress}
+                          </p>
+                          {walletData?.threshold && (
+                            <p className="text-sm text-green-700">
+                              Signature Threshold: {walletData.threshold} of{' '}
+                              {walletData.owners.length +
+                                walletData.pendingInvites.length}{' '}
+                              {walletData.owners.length +
+                                walletData.pendingInvites.length ===
+                              1
+                                ? 'owner'
+                                : 'owners'}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Current Owners */}
+                        {walletData?.owners && walletData.owners.length > 0 && (
+                          <div className="space-y-3">
+                            <Label className="text-purple-700 font-medium">
+                              Current Owners
+                            </Label>
+                            {walletData.owners.map((owner, index) => (
+                              <div
+                                key={index}
+                                className="flex items-center justify-between p-3 bg-white border border-purple-200 rounded-lg"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <User className="h-4 w-4 text-purple-500" />
+                                  <span className="text-sm">
+                                    {owner.email}
+                                    {owner.isCurrentUser && (
+                                      <span className="text-purple-600 ml-1">
+                                        (You)
+                                      </span>
+                                    )}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  {owner.accepted ? (
+                                    <CheckCircle2 className="h-4 w-4 text-green-500" />
+                                  ) : (
+                                    <Clock className="h-4 w-4 text-yellow-500" />
+                                  )}
+                                  <span className="text-xs text-gray-500">
+                                    {owner.accepted ? 'Active' : 'Pending'}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Pending Invites */}
+                        {walletData?.pendingInvites &&
+                          walletData.pendingInvites.length > 0 && (
+                            <div className="space-y-3">
+                              <Label className="text-purple-700 font-medium">
+                                Pending Invitations
+                              </Label>
+                              {walletData.pendingInvites.map(
+                                (invite, index) => (
+                                  <div
+                                    key={index}
+                                    className="flex items-center justify-between p-3 bg-orange-50 border border-orange-200 rounded-lg"
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <Clock className="h-4 w-4 text-orange-500" />
+                                      <span className="text-sm">
+                                        {invite.email}
+                                      </span>
+                                    </div>
+                                    <span className="text-xs text-orange-600">
+                                      Awaiting response
+                                    </span>
+                                  </div>
+                                )
+                              )}
+                            </div>
+                          )}
+                      </div>
+                    ) : (
+                      // No wallet yet - show creation form
+                      <div className="space-y-6">
+                        <div className="text-center mb-6">
+                          <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <Shield className="h-8 w-8 text-purple-600" />
+                          </div>
+                          <h3 className="text-lg font-medium text-gray-900 mb-2">
+                            Create Wallet
+                          </h3>
+                          <p className="text-gray-500 text-sm">
+                            Set up a secure multi-signature wallet for your wage
+                            group
+                          </p>
+                        </div>
+
+                        {/* Include Self Checkbox */}
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id="includeSelf"
+                            checked={includeSelf}
+                            onCheckedChange={(checked) =>
+                              setIncludeSelf(checked as boolean)
+                            }
+                            className="data-[state=checked]:bg-purple-300 data-[state=checked]:border-purple-300"
+                          />
+                          <Label
+                            htmlFor="includeSelf"
+                            className="text-purple-700 font-medium"
+                          >
+                            Include myself as owner
+                          </Label>
+                        </div>
+
+                        {/* Owner Emails Section */}
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-purple-700 font-medium">
+                              Additional Owners
+                            </Label>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={addOwnerEmail}
+                              className="border-purple-200 text-purple-700 hover:bg-purple-50 hover:border-purple-300"
+                            >
+                              <Plus className="w-4 h-4 mr-1" />
+                              Add Owner
+                            </Button>
+                          </div>
+
+                          {ownerEmails.map((email, index) => (
+                            <div key={index} className="flex gap-2">
+                              <Input
+                                type="email"
+                                value={email}
+                                onChange={(e) =>
+                                  updateOwnerEmail(index, e.target.value)
+                                }
+                                placeholder="owner@example.com"
+                                className="border-purple-200 focus:border-purple-400 focus:ring-purple-400"
+                              />
+                              {ownerEmails.length > 1 && (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => removeOwnerEmail(index)}
+                                  className="border-red-200 text-red-700 hover:bg-red-50 hover:border-red-300"
+                                >
+                                  <Minus className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Threshold Section */}
+                        <div className="space-y-2">
+                          <Label className="text-purple-700 font-medium">
+                            Signatures Required for Transactions
+                          </Label>
+                          <Input
+                            type="number"
+                            min="1"
+                            max={getMaxThreshold()}
+                            value={threshold}
+                            onChange={(e) => {
+                              const value = parseInt(e.target.value)
+                              if (value >= 1 && value <= getMaxThreshold()) {
+                                setThreshold(value)
+                              }
+                            }}
+                            className="border-purple-200 focus:border-purple-400 focus:ring-purple-400"
+                          />
+                          <p className="text-xs text-purple-600">
+                            Max: {getMaxThreshold()}
+                          </p>
+                        </div>
+
+                        {/* Summary */}
+                        <div className="bg-purple-50 rounded-lg p-4">
+                          <h4 className="font-medium text-purple-900 mb-2">
+                            Summary
+                          </h4>
+                          <ul className="text-sm text-purple-700 space-y-1">
+                            <li>• Number of owners: {getTotalOwners()}</li>
+                            <li>• Signatures required: {threshold}</li>
+                            {getTotalOwners() === 1 && (
+                              <li className="text-green-600">
+                                • Single owner - Wallet will be created
+                                immediately
+                              </li>
+                            )}
+                            {getTotalOwners() > 1 && (
+                              <li className="text-blue-600">
+                                • Invitations will be sent to other owners
+                              </li>
+                            )}
+                          </ul>
+                        </div>
+
+                        {/* Create Wallet Button */}
+                        <Button
+                          onClick={handleCreateWallet}
+                          disabled={!validateWalletForm() || isCreatingWallet}
+                          className="w-full bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white"
+                        >
+                          {isCreatingWallet ? (
+                            <>
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                              {getTotalOwners() === 1
+                                ? 'Creating Wallet...'
+                                : 'Sending Invitations...'}
+                            </>
+                          ) : (
+                            'Create Wallet'
+                          )}
+                        </Button>
+                      </div>
+                    )}
                   </TabsContent>
                 </div>
               </Tabs>

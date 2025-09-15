@@ -44,6 +44,8 @@ model WageGroup {
   paymentDate       Int         // Day of month (1-28)
   yieldSource       YieldSource @default(NONE)
   safeWalletAddress String?
+  saltNonce         String?  
+  threshold         Int?
   eercRegistered    Boolean     @default(false)
   isActive          Boolean     @default(false)
 
@@ -51,10 +53,11 @@ model WageGroup {
   updatedAt DateTime @updatedAt
 
   // Relations
-  creator    User                       @relation("WageGroupCreator", fields: [creatorId], references: [id], onDelete: Cascade)
-  ownerships WageGroupWalletOwnership[]
-  payees     Payee[]
-  deposits   Deposit[]
+  creator           User                           @relation("WageGroupCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  ownerships        WageGroupWalletOwnership[]
+  pendingInvites    WageGroupWalletInvite[]
+  payees            Payee[]
+  deposits          Deposit[]
 
   @@map("wage_groups")
 }
@@ -63,6 +66,7 @@ model WageGroupWalletOwnership {
   id               String  @id @default(auto()) @map("_id") @db.ObjectId
   userId           String  @db.ObjectId
   wageGroupId      String  @db.ObjectId
+  accepted         Boolean @default(false)
   isCurrentCoOwner Boolean @default(true)
 
   createdAt DateTime @default(now())
@@ -74,6 +78,23 @@ model WageGroupWalletOwnership {
 
   @@unique([userId, wageGroupId])
   @@map("wage_group_wallet_ownerships")
+}
+
+model WageGroupWalletInvite {
+  id          String  @id @default(auto()) @map("_id") @db.ObjectId
+  wageGroupId String  @db.ObjectId
+  email       String
+  accepted    Boolean @default(false)
+  userId      String? @db.ObjectId // Set when user registers and accepts
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  wageGroup WageGroup @relation(fields: [wageGroupId], references: [id], onDelete: Cascade)
+
+  @@unique([wageGroupId, email])
+  @@map("wage_group_wallet_invites")
 }
 
 model Payee {
