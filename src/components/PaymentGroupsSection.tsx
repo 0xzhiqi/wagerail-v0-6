@@ -195,23 +195,6 @@ export function PaymentGroupsSection({
                           </Button>
                         </div>
                       </div>
-
-                      {/* EERC Status */}
-                      <div className="bg-white/70 backdrop-blur-sm rounded-lg p-3 border border-white/50 md:col-span-2">
-                        <div className="flex items-center space-x-2">
-                          <div
-                            className={`w-2 h-2 rounded-full ${group.eercRegistered ? 'bg-green-500' : 'bg-yellow-500'}`}
-                          ></div>
-                          <span className="text-xs font-medium text-gray-600 uppercase tracking-wide">
-                            EERC Status
-                          </span>
-                        </div>
-                        <p className="text-sm font-semibold text-gray-900 mt-1">
-                          {group.eercRegistered
-                            ? 'EERC Registered'
-                            : 'Pending Registration'}
-                        </p>
-                      </div>
                     </div>
 
                     {/* Payees List */}
@@ -304,11 +287,11 @@ export function PaymentGroupsSection({
 
                     {/* Enhanced Wallet Button - Right aligned */}
                     <button
-                      className="group/btn relative w-12 h-12 bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 overflow-hidden flex items-center justify-center"
+                      className="group/btn relative w-12 h-12 bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 flex items-center justify-center overflow-hidden"
                       onClick={() => onWalletClick(group)}
                     >
                       {/* Animated background effect */}
-                      <div className="absolute inset-0 bg-gradient-to-r from-purple-400 to-violet-400 opacity-0 group-hover/btn:opacity-100 transition-opacity duration-300"></div>
+                      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -skew-x-12 translate-x-[-100%] group-hover/btn:translate-x-[100%] transition-transform duration-1000 origin-left"></div>
 
                       {/* Icon */}
                       <Wallet className="relative w-5 h-5 group-hover/btn:scale-110 transition-transform duration-200 z-10" />

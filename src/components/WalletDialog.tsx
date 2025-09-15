@@ -24,7 +24,7 @@ import {
 } from 'thirdweb'
 import { approve, balanceOf } from 'thirdweb/extensions/erc20'
 import { Account } from 'thirdweb/wallets'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { EERC_ABI, USDC_ABI, YIELD_VAULT_ABI } from '@/lib/constants/abis'
 import { CONTRACT_ADDRESSES } from '@/lib/constants/contract-addresses'
 import { deriveKeysFromUser, getDecryptedBalance } from '@/lib/crypto-utils'
@@ -40,8 +40,11 @@ import { useSafeEercRegistration } from '@/hooks/use-safe-eerc-registration'
 interface WageGroup {
   id: string
   name: string
+  startDate: string
+  paymentDate: number
   yieldSource: string
   eercRegistered: boolean
+  isActive: boolean
   safeWalletAddress?: string
   payees: Array<{
     email: string
@@ -69,6 +72,7 @@ interface WalletDialogProps {
   onOpenChange: (open: boolean) => void
   wageGroup: WageGroup | null
   account: Account | null
+  onWageGroupUpdate?: (updatedWageGroup: WageGroup) => void
 }
 
 export function WalletDialog({
@@ -76,6 +80,7 @@ export function WalletDialog({
   onOpenChange,
   wageGroup,
   account,
+  onWageGroupUpdate,
 }: WalletDialogProps) {
   const [amount, setAmount] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -101,6 +106,11 @@ export function WalletDialog({
   const [walletData, setWalletData] = useState<WalletData | null>(null)
   const [isLoadingWalletData, setIsLoadingWalletData] = useState(false)
   const [showSafeEercSuccess, setShowSafeEercSuccess] = useState(false)
+
+  // Improved fetch tracking to prevent infinite loops
+  const fetchInProgressRef = useRef(false)
+  const lastSuccessfulFetchRef = useRef<string>('')
+  const successHandledRef = useRef(false)
 
   // Safe eERC registration hook
   const {
@@ -136,33 +146,46 @@ export function WalletDialog({
     loadClient()
   }, [])
 
-  // Handle Safe eERC registration success
+  // Handle Safe eERC registration success - FIXED to prevent infinite loops
   useEffect(() => {
-    if (isSafeConfirmed) {
+    if (isSafeConfirmed && wageGroup && !successHandledRef.current) {
+      console.log(
+        'WalletDialog: Safe eERC registration confirmed, handling success...'
+      )
+      successHandledRef.current = true
+
       setShowSafeEercSuccess(true)
-      // Refresh wallet data to get updated eERC status
-      fetchWalletData()
 
-      // Hide success message after 1 second
-      setTimeout(() => {
-        setShowSafeEercSuccess(false)
+      // Update the wage group's eERC status immediately
+      const updatedWageGroup = {
+        ...wageGroup,
+        eercRegistered: true,
+      }
+
+      // Notify parent component of the update
+      if (onWageGroupUpdate) {
+        onWageGroupUpdate(updatedWageGroup)
+      }
+
+      // Schedule a single wallet data refresh after a delay
+      const refreshTimeout = setTimeout(() => {
+        console.log(
+          'WalletDialog: Refreshing wallet data after registration success'
+        )
+        fetchWalletData()
       }, 1000)
-    }
-  }, [isSafeConfirmed])
 
-  // Fetch wallet data when settings tab is opened
-  useEffect(() => {
-    if (open && activeTab === 'settings' && wageGroup?.id) {
-      fetchWalletData()
-    }
-  }, [open, activeTab, wageGroup?.id])
+      // Hide success message after delay
+      const hideTimeout = setTimeout(() => {
+        setShowSafeEercSuccess(false)
+      }, 3000)
 
-  // Fetch wallet data when switching to topup tab to ensure fresh data
-  useEffect(() => {
-    if (open && activeTab === 'topup' && wageGroup?.id) {
-      fetchWalletData()
+      return () => {
+        clearTimeout(refreshTimeout)
+        clearTimeout(hideTimeout)
+      }
     }
-  }, [open, activeTab, wageGroup?.id])
+  }, [isSafeConfirmed, wageGroup, onWageGroupUpdate])
 
   // Calculate total owners and update threshold if it exceeds maximum
   useEffect(() => {
@@ -176,24 +199,67 @@ export function WalletDialog({
     }
   }, [includeSelf, ownerEmails, threshold])
 
-  const fetchWalletData = async () => {
-    if (!wageGroup?.id) return
+  // Improved fetchWalletData with better duplicate prevention
+  const fetchWalletData = useCallback(async () => {
+    if (!wageGroup?.id || fetchInProgressRef.current) {
+      console.log(
+        'WalletDialog: Skipping fetch - no wage group or fetch in progress'
+      )
+      return
+    }
 
+    const fetchKey = `${wageGroup.id}-${Date.now()}`
+
+    // Prevent rapid successive calls
+    if (
+      lastSuccessfulFetchRef.current &&
+      Date.now() -
+        parseInt(lastSuccessfulFetchRef.current.split('-').pop() || '0') <
+        2000
+    ) {
+      console.log(
+        'WalletDialog: Skipping fetch - too soon after last successful fetch'
+      )
+      return
+    }
+
+    fetchInProgressRef.current = true
     setIsLoadingWalletData(true)
+
     try {
+      console.log('WalletDialog: Fetching wallet data for', wageGroup.id)
       const response = await fetch(`/api/wallet?wageGroupId=${wageGroup.id}`)
       if (response.ok) {
         const result = await response.json()
         if (result.success) {
           setWalletData(result.data)
+          lastSuccessfulFetchRef.current = fetchKey
+          console.log('WalletDialog: Successfully fetched wallet data')
         }
       }
     } catch (error) {
       console.error('Error fetching wallet data:', error)
     } finally {
       setIsLoadingWalletData(false)
+      fetchInProgressRef.current = false
     }
-  }
+  }, [wageGroup?.id])
+
+  // Simplified effect for wallet data fetching - only trigger on dialog open and tab change
+  useEffect(() => {
+    if (
+      open &&
+      wageGroup?.id &&
+      (activeTab === 'settings' || activeTab === 'topup')
+    ) {
+      // Add delay to prevent rapid calls during tab switches
+      const timeoutId = setTimeout(() => {
+        fetchWalletData()
+      }, 300)
+
+      return () => clearTimeout(timeoutId)
+    }
+  }, [open, wageGroup?.id, activeTab, fetchWalletData])
 
   // Memoize the USDC contract to prevent recreation
   const usdcContract = useMemo(() => {
@@ -393,9 +459,6 @@ export function WalletDialog({
         setOwnerEmails([''])
         setThreshold(1)
 
-        // Refresh wallet data
-        await fetchWalletData()
-
         // Determine success message based on wallet creation type
         const totalOwners = getTotalOwners()
         if (totalOwners === 1) {
@@ -411,10 +474,8 @@ export function WalletDialog({
         // Automatically route to Top Up page after wallet creation
         setTimeout(() => {
           setActiveTab('topup')
-          // Force a data refresh when switching to topup tab
-          if (wageGroup?.id) {
-            fetchWalletData()
-          }
+          // Clear fetch tracking to allow fresh fetch
+          lastSuccessfulFetchRef.current = ''
         }, 2000)
       } else {
         console.error('Failed to create wallet:', result.error)
@@ -729,9 +790,10 @@ export function WalletDialog({
     }
   }
 
-  // Reset states when dialog closes
+  // Reset states when dialog closes - IMPROVED to reset all tracking refs
   useEffect(() => {
     if (!open) {
+      console.log('WalletDialog: Dialog closing, resetting all state...')
       setShowSuccess(false)
       setSuccessData(null)
       setWalletSuccessMessage('')
@@ -745,6 +807,10 @@ export function WalletDialog({
       setIncludeSelf(true)
       setOwnerEmails([''])
       setThreshold(1)
+      // Reset ALL tracking refs to prevent lingering state
+      fetchInProgressRef.current = false
+      lastSuccessfulFetchRef.current = ''
+      successHandledRef.current = false
     }
   }, [open])
 
@@ -1046,128 +1112,127 @@ export function WalletDialog({
                                 : 'owners'}
                             </p>
                           )}
-                        </div>
-
-                        {/* eERC Registration Section */}
-                        <div className="border-t border-gray-200 pt-4">
-                          <div className="flex items-center justify-between mb-4">
-                            <div className="flex items-center gap-2">
-                              <Users className="h-5 w-5 text-purple-600" />
-                              <h3 className="font-medium text-purple-800">
-                                Encrypted Tokens (eERC)
-                              </h3>
-                            </div>
-                            {wageGroup.eercRegistered ? (
-                              <div className="flex items-center space-x-1 text-green-600 bg-green-50 px-3 py-1.5 rounded-md">
-                                <ShieldCheck className="h-4 w-4" />
-                                <span className="text-sm font-medium">
-                                  eERC Registered
-                                </span>
-                              </div>
-                            ) : (
-                              <Button
-                                onClick={handleSafeEercRegistration}
-                                disabled={
-                                  isSafeEercPending ||
-                                  !walletData?.safeWalletAddress
-                                }
-                                className="bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700"
-                                size="sm"
-                              >
-                                {isSafeEercPending ? (
-                                  <span className="flex items-center">
-                                    <Loader2 className="animate-spin mr-2 h-3 w-3" />
-                                    {isSafePreparingProof &&
-                                      'Generating Proof...'}
-                                    {isSafeProposing &&
-                                      'Proposing Transaction...'}
-                                    {isSafeWaitingSignatures &&
-                                      `Waiting for ${pendingSignatures} signatures...`}
-                                    {isSafeExecuting && 'Executing...'}
+                          {/* eERC Registration Section */}
+                          <div className="border-t mt-6 border-gray-200 pt-4">
+                            <div className="flex items-center justify-between mb-2 mr-4">
+                              <div className="flex items-center gap-2"></div>
+                              {wageGroup.eercRegistered ? (
+                                <div className="flex items-center space-x-1 text-green-600 bg-green-200 px-3 py-1.5 rounded-md">
+                                  <ShieldCheck className="h-4 w-4" />
+                                  <span className="text-sm font-medium">
+                                    eERC Registered
                                   </span>
-                                ) : (
-                                  <>
-                                    <Shield className="h-3 w-3 mr-1" />
-                                    Register eERC
-                                  </>
-                                )}
-                              </Button>
-                            )}
-                          </div>
-
-                          {/* Registration Status Details */}
-                          {isSafeEercPending && (
-                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
-                              <div className="space-y-2">
-                                {isSafePreparingProof && (
-                                  <div className="flex items-center gap-2 text-blue-700">
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                    <span className="text-sm">
-                                      Generating zero-knowledge proof...
-                                    </span>
-                                  </div>
-                                )}
-                                {isSafeProposing && (
-                                  <div className="flex items-center gap-2 text-blue-700">
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                    <span className="text-sm">
-                                      Proposing transaction to Safe...
-                                    </span>
-                                  </div>
-                                )}
-                                {isSafeWaitingSignatures && (
-                                  <div className="flex items-center gap-2 text-orange-700">
-                                    <Clock className="h-4 w-4" />
-                                    <span className="text-sm">
-                                      Waiting for {pendingSignatures} more
-                                      signature
-                                      {pendingSignatures !== 1 ? 's' : ''}
-                                    </span>
-                                  </div>
-                                )}
-                                {isSafeExecuting && (
-                                  <div className="flex items-center gap-2 text-green-700">
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                    <span className="text-sm">
-                                      Executing transaction on blockchain...
-                                    </span>
-                                  </div>
-                                )}
-                                {safeTxHash && (
-                                  <div className="mt-2">
-                                    <p className="text-xs text-blue-600 font-medium">
-                                      Safe Transaction Hash:
-                                    </p>
-                                    <p className="text-xs font-mono text-blue-500 break-all">
-                                      {safeTxHash}
-                                    </p>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Error Display */}
-                          {safeEercError && (
-                            <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
-                              <p className="text-sm text-red-700">
-                                Registration failed: {safeEercError.message}
-                              </p>
-                            </div>
-                          )}
-
-                          <p className="text-sm text-gray-600">
-                            Register your Safe wallet to enable encrypted token
-                            transactions.
-                            {walletData?.threshold &&
-                              walletData.threshold > 1 && (
-                                <span className="block mt-1 text-purple-600">
-                                  Requires {walletData.threshold} signature
-                                  {walletData.threshold !== 1 ? 's' : ''} to
-                                  complete.
-                                </span>
+                                </div>
+                              ) : (
+                                <div className="flex flex-col items-center justify-center">
+                                  <Button
+                                    onClick={handleSafeEercRegistration}
+                                    disabled={
+                                      isSafeEercPending ||
+                                      !walletData?.safeWalletAddress
+                                    }
+                                    className="w-full bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700"
+                                    size="sm"
+                                  >
+                                    {isSafeEercPending ? (
+                                      <span className="flex items-center">
+                                        <Loader2 className="animate-spin mr-2 h-3 w-3" />
+                                        {isSafePreparingProof &&
+                                          'Generating Proof...'}
+                                        {isSafeProposing &&
+                                          'Proposing Transaction...'}
+                                        {isSafeWaitingSignatures &&
+                                          `Waiting for ${pendingSignatures} signatures...`}
+                                        {isSafeExecuting && 'Executing...'}
+                                      </span>
+                                    ) : (
+                                      <>
+                                        <Shield className="h-3 w-3 mr-1" />
+                                        Register eERC
+                                      </>
+                                    )}
+                                  </Button>
+                                  <p className="text-xs mt-2 text-gray-500">
+                                    Register your wallet to start encrypted
+                                    token transactions
+                                  </p>
+                                </div>
                               )}
-                          </p>
+                            </div>
+
+                            {/* Registration Status Details */}
+                            {isSafeEercPending && (
+                              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                                <div className="space-y-2">
+                                  {isSafePreparingProof && (
+                                    <div className="flex items-center gap-2 text-blue-700">
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                      <span className="text-sm">
+                                        Generating zero-knowledge proof...
+                                      </span>
+                                    </div>
+                                  )}
+                                  {isSafeProposing && (
+                                    <div className="flex items-center gap-2 text-blue-700">
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                      <span className="text-sm">
+                                        Proposing transaction to create Safe
+                                        wallet...
+                                      </span>
+                                    </div>
+                                  )}
+                                  {isSafeWaitingSignatures && (
+                                    <div className="flex items-center gap-2 text-orange-700">
+                                      <Clock className="h-4 w-4" />
+                                      <span className="text-sm">
+                                        Waiting for {pendingSignatures} more
+                                        signature
+                                        {pendingSignatures !== 1 ? 's' : ''}
+                                      </span>
+                                    </div>
+                                  )}
+                                  {isSafeExecuting && (
+                                    <div className="flex items-center gap-2 text-blue-700">
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                      <span className="text-sm">
+                                        Completing transaction...
+                                      </span>
+                                    </div>
+                                  )}
+                                  {safeTxHash && (
+                                    <div className="mt-2">
+                                      <p className="text-xs text-blue-600 font-medium">
+                                        Safe Transaction Hash:
+                                      </p>
+                                      <p className="text-xs font-mono text-blue-500 break-all">
+                                        {safeTxHash}
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Error Display */}
+                            {safeEercError && (
+                              <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+                                <p className="text-sm text-red-700">
+                                  Registration failed: {safeEercError.message}
+                                </p>
+                              </div>
+                            )}
+
+                            <p className="text-sm text-gray-600">
+                              {walletData?.threshold &&
+                                walletData.threshold > 1 && (
+                                  <span className="block mt-1 text-purple-600">
+                                    Requires {walletData.threshold} signature
+                                    {walletData.threshold !== 1 ? 's' : ''} to
+                                    complete.
+                                  </span>
+                                )}
+                            </p>
+                          </div>
                         </div>
 
                         {/* Current Owners */}
@@ -1345,13 +1410,13 @@ export function WalletDialog({
                             <li>• Number of owners: {getTotalOwners()}</li>
                             <li>• Signatures required: {threshold}</li>
                             {getTotalOwners() === 1 && (
-                              <li className="text-green-600">
+                              <li className="text-purple-700 font-semibold">
                                 • Single owner - Wallet will be created
                                 immediately
                               </li>
                             )}
                             {getTotalOwners() > 1 && (
-                              <li className="text-blue-600">
+                              <li className="text-purple-700 font-semibold">
                                 • Invitations will be sent to other owners
                               </li>
                             )}
