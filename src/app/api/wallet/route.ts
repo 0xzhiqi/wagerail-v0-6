@@ -6,6 +6,7 @@ import { createPublicClient, createWalletClient, http, type Chain } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/clients/prisma'
+import { i0 } from '@/lib/crypto-utils'
 import { sendWalletOwnerInvitation } from '@/lib/email'
 import { getChain } from '@/lib/environment/get-chain'
 import { checkAuthStatus } from '@/actions/auth'
@@ -15,6 +16,7 @@ interface CreateWalletRequest {
   includeSelf: boolean
   ownerEmails: string[]
   threshold: number
+  userSignature: string // Add signature from frontend
 }
 
 interface WalletData {
@@ -41,11 +43,19 @@ export async function POST(request: NextRequest) {
     }
 
     const body: CreateWalletRequest = await request.json()
-    const { wageGroupId, includeSelf, ownerEmails, threshold } = body
+    const { wageGroupId, includeSelf, ownerEmails, threshold, userSignature } =
+      body
 
     // Validate input
     if (!wageGroupId || threshold < 1) {
       return NextResponse.json({ error: 'Invalid input' }, { status: 400 })
+    }
+
+    if (!userSignature) {
+      return NextResponse.json(
+        { error: 'User signature required' },
+        { status: 400 }
+      )
     }
 
     // Get wage group and verify ownership
@@ -92,6 +102,14 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Derive private key and address from user signature (same as eERC registration)
+    const derivedPrivateKey = i0(userSignature)
+    const privateKeyHex = `0x${derivedPrivateKey.toString(16).padStart(64, '0')}`
+    const derivedAccount = privateKeyToAccount(privateKeyHex as `0x${string}`)
+    const ownerAddress = derivedAccount.address
+
+    console.log('Derived owner address from signature:', ownerAddress)
+
     // Generate unique numeric salt for this wage group (Safe SDK requires numeric string)
     const timestamp = Date.now().toString()
     const randomNum = Math.floor(Math.random() * 1000000).toString()
@@ -100,12 +118,12 @@ export async function POST(request: NextRequest) {
     // If only current user, create Safe directly
     if (totalOwners === 1 && includeSelf && validEmails.length === 0) {
       try {
-        // Initialize Safe with current user as sole owner
-        const SIGNER_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEMP_PK!
+        // Initialize Safe with derived address as sole owner
         const chain = getChain()
+        console.log('Creating Safe with owner:', ownerAddress)
 
         const safeAccountConfig: SafeAccountConfig = {
-          owners: [authStatus.user.walletAddress],
+          owners: [ownerAddress], // Use derived address instead of authStatus.user.walletAddress
           threshold: 1,
         }
 
@@ -119,7 +137,7 @@ export async function POST(request: NextRequest) {
 
         const protocolKit = await Safe.init({
           provider: chain.rpc,
-          signer: SIGNER_PRIVATE_KEY,
+          signer: privateKeyHex, // Use derived private key
           predictedSafe,
         })
 
@@ -128,7 +146,6 @@ export async function POST(request: NextRequest) {
         console.log('Predicted Safe address with salt:', safeAddress)
 
         // Create viem client for transaction execution
-        const account = privateKeyToAccount(SIGNER_PRIVATE_KEY as `0x${string}`)
         const thirdwebChain = getChain()
 
         // Create compatible viem chain from thirdweb chain
@@ -148,7 +165,7 @@ export async function POST(request: NextRequest) {
         }
 
         const walletClient = createWalletClient({
-          account,
+          account: derivedAccount, // Use derived account
           chain: viemChain,
           transport: http(thirdwebChain.rpc),
         })
@@ -223,7 +240,7 @@ export async function POST(request: NextRequest) {
         console.log('Safe deployment confirmed in block:', receipt.blockNumber)
 
         // Verify deployment was successful
-        const deployedCode = await publicClient.getBytecode({
+        const deployedCode = await publicClient.getCode({
           address: safeAddress as `0x${string}`,
         })
 

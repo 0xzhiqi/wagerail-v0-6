@@ -306,3 +306,54 @@ export async function getWageGroups() {
     }
   }
 }
+
+export async function updateWageGroupEercStatus(
+  wageGroupId: string,
+  eercRegistered: boolean
+) {
+  try {
+    console.log(
+      `Updating wage group ${wageGroupId} eERC status to ${eercRegistered}`
+    )
+
+    // Verify authentication
+    const auth = await verifyAuth()
+    if (!auth.isAuthenticated) {
+      return { success: false, error: auth.error || 'Not authenticated' }
+    }
+
+    // Verify user owns this wage group
+    const wageGroup = await prisma.wageGroup.findFirst({
+      where: {
+        id: wageGroupId,
+        creatorId: auth.user!.id,
+      },
+    })
+
+    if (!wageGroup) {
+      return { success: false, error: 'Wage group not found or access denied' }
+    }
+
+    // Update the eERC registration status
+    const updatedWageGroup = await prisma.wageGroup.update({
+      where: { id: wageGroupId },
+      data: { eercRegistered },
+    })
+
+    console.log('Updated wage group eERC status:', updatedWageGroup.id)
+
+    return {
+      success: true,
+      wageGroup: {
+        id: updatedWageGroup.id,
+        eercRegistered: updatedWageGroup.eercRegistered,
+      },
+    }
+  } catch (error) {
+    console.error('Error updating wage group eERC status:', error)
+    return {
+      success: false,
+      error: 'Failed to update wage group eERC status',
+    }
+  }
+}
