@@ -1,10 +1,20 @@
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils'
 import { Base8, mulPointEscalar, subOrder } from '@zk-kit/baby-jubjub'
+import { genPrivKey, hash2 } from 'maci-crypto'
+import { poseidon3 } from 'poseidon-lite'
 import { type Account } from 'thirdweb/wallets'
 import { keccak256 } from 'viem'
 
-import { decryptPoint } from './jub'
-import { processPoseidonDecryption } from './poseidon'
+import {
+  CalldataTransferCircuitGroth16,
+  TransferCircuit,
+  zkit,
+} from './circuit-manager'
+import { decryptPoint, encryptMessage } from './jub'
+import {
+  processPoseidonDecryption,
+  processPoseidonEncryption,
+} from './poseidon'
 
 // Export subOrder for use in other modules
 export { subOrder }
@@ -382,4 +392,162 @@ export const decryptPCT = async (
   )
 
   return decrypted
+}
+
+export class User {
+  privateKey: bigint
+  formattedPrivateKey: bigint
+  publicKey: bigint[]
+  signer: any // SignerWithAddress TODO: fix based on import type { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/dist/src/signer-with-address";
+
+  constructor(signer: any) {
+    this.signer = signer
+    // gen private key
+    this.privateKey = genPrivKey()
+    // format private key for baby jubjub
+    this.formattedPrivateKey =
+      formatPrivKeyForBabyJub(this.privateKey) % subOrder
+    // gen public key
+    this.publicKey = mulPointEscalar(Base8, this.formattedPrivateKey).map((x) =>
+      BigInt(x)
+    )
+  }
+
+  get address() {
+    const address = hash2(this.publicKey)
+    return address
+  }
+
+  /**
+   *
+   * @param chainId Chain ID of the network
+   * @returns The registration hash for the user CRH(CHAIN_ID | PRIVATE_KEY | ADDRESS)
+   */
+  genRegistrationHash(chainId: bigint) {
+    const registrationHash = poseidon3([
+      chainId,
+      this.formattedPrivateKey,
+      BigInt(this.signer.address),
+    ])
+
+    return registrationHash
+  }
+}
+
+/**
+ * Creates a User object with custom private key
+ * @param privateKey The private key to use for the user
+ * @param signer The signer instance to associate with the user
+ * @returns User object with overridden keys
+ */
+export function createUserFromPrivateKey(
+  privateKey: bigint,
+  signer: any
+): User {
+  // Create a new user instance
+  const user = new User(signer)
+
+  // Override the generated keys with our deterministic ones
+  user.privateKey = privateKey
+  user.formattedPrivateKey = formatPrivKeyForBabyJub(privateKey)
+  user.publicKey = mulPointEscalar(Base8, user.formattedPrivateKey).map((x) =>
+    BigInt(x)
+  )
+
+  return user
+}
+
+/**
+ * Function for transferring tokens privately in the eERC protocol
+ * @param sender Sender
+ * @param senderBalance Sender balance in plain
+ * @param receiverPublicKey Receiver's public key
+ * @param transferAmount Amount to be transferred
+ * @param senderEncryptedBalance Sender encrypted balance from eERC contract
+ * @param auditorPublicKey Auditor's public key
+ * @returns proof, publicInputs - Proof and public inputs for the generated proof
+ * @returns senderBalancePCT - Sender's balance after the transfer encrypted with Poseidon encryption
+ */
+export const privateTransfer = async (
+  sender: User,
+  senderBalance: bigint,
+  receiverPublicKey: bigint[],
+  transferAmount: bigint,
+  senderEncryptedBalance: bigint[],
+  auditorPublicKey: bigint[]
+): Promise<{
+  proof: CalldataTransferCircuitGroth16
+  senderBalancePCT: bigint[]
+}> => {
+  const senderNewBalance = senderBalance - transferAmount
+  // 1. encrypt the transfer amount with el-gamal for sender
+  const { cipher: encryptedAmountSender } = encryptMessage(
+    sender.publicKey,
+    transferAmount
+  )
+
+  // 2. encrypt the transfer amount with el-gamal for receiver
+  const {
+    cipher: encryptedAmountReceiver,
+    random: encryptedAmountReceiverRandom,
+  } = encryptMessage(receiverPublicKey, transferAmount)
+
+  // 3. creates a pct for receiver with the transfer amount
+  const {
+    ciphertext: receiverCiphertext,
+    nonce: receiverNonce,
+    authKey: receiverAuthKey,
+    encRandom: receiverEncRandom,
+  } = processPoseidonEncryption([transferAmount], receiverPublicKey)
+
+  // 4. creates a pct for auditor with the transfer amount
+  const {
+    ciphertext: auditorCiphertext,
+    nonce: auditorNonce,
+    authKey: auditorAuthKey,
+    encRandom: auditorEncRandom,
+  } = processPoseidonEncryption([transferAmount], auditorPublicKey)
+
+  // 5. create pct for the sender with the newly calculated balance
+  const {
+    ciphertext: senderCiphertext,
+    nonce: senderNonce,
+    authKey: senderAuthKey,
+  } = processPoseidonEncryption([senderNewBalance], sender.publicKey)
+
+  const circuit = await zkit.getCircuit('TransferCircuit')
+  const transferCircuit = circuit as unknown as TransferCircuit
+
+  const input = {
+    ValueToTransfer: transferAmount,
+    SenderPrivateKey: sender.formattedPrivateKey,
+    SenderPublicKey: sender.publicKey,
+    SenderBalance: senderBalance,
+    SenderBalanceC1: senderEncryptedBalance.slice(0, 2),
+    SenderBalanceC2: senderEncryptedBalance.slice(2, 4),
+    SenderVTTC1: encryptedAmountSender[0],
+    SenderVTTC2: encryptedAmountSender[1],
+    ReceiverPublicKey: receiverPublicKey,
+    ReceiverVTTC1: encryptedAmountReceiver[0],
+    ReceiverVTTC2: encryptedAmountReceiver[1],
+    ReceiverVTTRandom: encryptedAmountReceiverRandom,
+    ReceiverPCT: receiverCiphertext,
+    ReceiverPCTAuthKey: receiverAuthKey,
+    ReceiverPCTNonce: receiverNonce,
+    ReceiverPCTRandom: receiverEncRandom,
+
+    AuditorPublicKey: auditorPublicKey,
+    AuditorPCT: auditorCiphertext,
+    AuditorPCTAuthKey: auditorAuthKey,
+    AuditorPCTNonce: auditorNonce,
+    AuditorPCTRandom: auditorEncRandom,
+  }
+
+  const proof = await transferCircuit.generateProof(input)
+  const calldata = await transferCircuit.generateCalldata(proof)
+
+  return {
+    proof: calldata,
+    senderBalancePCT: [...senderCiphertext, ...senderAuthKey, senderNonce],
+  }
 }

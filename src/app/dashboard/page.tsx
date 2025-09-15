@@ -299,19 +299,6 @@ export default function DashboardPage() {
     setNameData(updatedNameData)
   }
 
-  // Add handler for wage group updates
-  const handleWageGroupUpdate = (updatedWageGroup: WageGroup) => {
-    setWageGroups((prevGroups) =>
-      prevGroups.map((group) =>
-        group.id === updatedWageGroup.id ? updatedWageGroup : group
-      )
-    )
-    // Update selectedWageGroup if it's the one being updated
-    if (selectedWageGroup?.id === updatedWageGroup.id) {
-      setSelectedWageGroup(updatedWageGroup)
-    }
-  }
-
   const handleStatusToggleClick = (group: WageGroup) => {
     setSelectedWageGroup(group)
     setShowStatusDialog(true)
@@ -453,13 +440,12 @@ export default function DashboardPage() {
         isCreating={isCreating}
       />
 
-      {/* Updated WalletDialog with onWageGroupUpdate prop */}
+      {/* Pass connectedAccount to WalletDialog - only when wallet is properly connected */}
       <WalletDialog
         open={showWalletDialog}
         onOpenChange={setShowWalletDialog}
         wageGroup={selectedWageGroup}
-        account={connectedAccount}
-        onWageGroupUpdate={handleWageGroupUpdate}
+        account={connectedAccount} // This will be null until wallet is properly connected
       />
 
       <EditNameDialog

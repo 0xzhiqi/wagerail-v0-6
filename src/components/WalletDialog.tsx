@@ -25,7 +25,12 @@ import {
 import { approve, balanceOf } from 'thirdweb/extensions/erc20'
 import { Account } from 'thirdweb/wallets'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { EERC_ABI, USDC_ABI, YIELD_VAULT_ABI } from '@/lib/constants/abis'
+import {
+  EERC_ABI,
+  REGISTRAR_ABI,
+  USDC_ABI,
+  YIELD_VAULT_ABI,
+} from '@/lib/constants/abis'
 import { CONTRACT_ADDRESSES } from '@/lib/constants/contract-addresses'
 import { deriveKeysFromUser, getDecryptedBalance } from '@/lib/crypto-utils'
 import { chain } from '@/lib/environment/get-chain'
@@ -34,7 +39,9 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { usePrivateTransfer } from '@/hooks/use-private-transfer'
 import { useSafeEercRegistration } from '@/hooks/use-safe-eerc-registration'
 
 interface WageGroup {
@@ -75,6 +82,25 @@ interface WalletDialogProps {
   onWageGroupUpdate?: (updatedWageGroup: WageGroup) => void
 }
 
+interface DepositProgress {
+  currentStep: number
+  totalSteps: number
+  stepMessages: string[]
+}
+
+const getVaultAddress = (yieldSource: string) => {
+  switch (yieldSource) {
+    case 're7-labs':
+      return CONTRACT_ADDRESSES.VAULTS['re7-labs']
+    case 'k3-capital':
+      return CONTRACT_ADDRESSES.VAULTS['k3-capital']
+    case 'mev-capital':
+      return CONTRACT_ADDRESSES.VAULTS['mev-capital']
+    default:
+      return null
+  }
+}
+
 export function WalletDialog({
   open,
   onOpenChange,
@@ -92,6 +118,13 @@ export function WalletDialog({
   } | null>(null)
   const [walletSuccessMessage, setWalletSuccessMessage] = useState('')
   const [activeTab, setActiveTab] = useState('topup')
+
+  // Progress tracking state
+  const [depositProgress, setDepositProgress] = useState<DepositProgress>({
+    currentStep: 0,
+    totalSteps: 0,
+    stepMessages: [],
+  })
 
   const [usdcBalance, setUsdcBalance] = useState<bigint | null>(null)
   const [balanceLoading, setBalanceLoading] = useState(false)
@@ -199,6 +232,57 @@ export function WalletDialog({
     }
   }, [includeSelf, ownerEmails, threshold])
 
+  // UPDATED: Remove tokenAddress from the hook initialization
+  const {
+    transfer: executePrivateTransfer,
+    isPending: isTransferPending,
+    isPreparingTransfer,
+    isGeneratingProof,
+    isWritePending: isTransferWritePending,
+    isConfirming: isTransferConfirming,
+    isConfirmed: isTransferConfirmed,
+    error: transferError,
+    hash: transferHash,
+  } = usePrivateTransfer({
+    safeWalletAddress: wageGroup?.safeWalletAddress || '',
+  })
+
+  // Helper function to initialize progress steps
+  const initializeProgress = (hasYieldSource: boolean) => {
+    if (hasYieldSource) {
+      setDepositProgress({
+        currentStep: 0,
+        totalSteps: 5,
+        stepMessages: [
+          'Initiating USDC transfer',
+          'Depositing into yield vault',
+          'Encrypting yield shares',
+          'Finalising deposit',
+          'Deposit complete',
+        ],
+      })
+    } else {
+      setDepositProgress({
+        currentStep: 0,
+        totalSteps: 4,
+        stepMessages: [
+          'Initiating USDC transfer',
+          'Encrypting USDC',
+          'Finalising deposit',
+          'Deposit complete',
+        ],
+      })
+    }
+  }
+
+  // Helper function to advance progress
+  const advanceProgress = () => {
+    setDepositProgress((prev) => ({
+      ...prev,
+      currentStep: Math.min(prev.currentStep + 1, prev.totalSteps),
+    }))
+  }
+
   // Improved fetchWalletData with better duplicate prevention
   const fetchWalletData = useCallback(async () => {
     if (!wageGroup?.id || fetchInProgressRef.current) {
@@ -282,6 +366,18 @@ export function WalletDialog({
       chain,
       address: CONTRACT_ADDRESSES.EERC,
       abi: EERC_ABI,
+    })
+  }, [thirdwebClient])
+
+  // Memoize the Registrar contract
+  const registrarContract = useMemo(() => {
+    if (!thirdwebClient) return null
+    console.log('WalletDialog: Creating registrarContract')
+    return getContract({
+      client: thirdwebClient,
+      chain,
+      address: CONTRACT_ADDRESSES.REGISTRAR,
+      abi: REGISTRAR_ABI,
     })
   }, [thirdwebClient])
 
@@ -376,16 +472,333 @@ export function WalletDialog({
     return wageGroup.payees.reduce((sum, payee) => sum + payee.monthlyAmount, 0)
   }
 
-  const getVaultAddress = (yieldSource: string) => {
-    switch (yieldSource) {
-      case 're7-labs':
-        return CONTRACT_ADDRESSES.VAULTS['re7-labs']
-      case 'k3-capital':
-        return CONTRACT_ADDRESSES.VAULTS['k3-capital']
-      case 'mev-capital':
-        return CONTRACT_ADDRESSES.VAULTS['mev-capital']
-      default:
-        return null
+  // Helper function to deposit into EERC contract
+  const depositIntoEERC = async (
+    tokenToDeposit: any,
+    depositAmount: bigint,
+    tokenAddress: string
+  ) => {
+    if (!eercContract || !account) return null
+
+    console.log('WalletDialog: Starting EERC deposit process...')
+
+    // Generate keys for the user using the account directly
+    const { privateKey: userPrivateKey, publicKey: derivedPublicKey } =
+      await deriveKeysFromUser(account.address, account)
+    console.log('WalletDialog: Generated keys for EERC deposit')
+
+    // Generate amountPCT for auditing
+    const depositAmountBigInt = BigInt(depositAmount.toString())
+    const publicKeyBigInt = [derivedPublicKey[0], derivedPublicKey[1]]
+
+    const {
+      ciphertext: amountCiphertext,
+      nonce: amountNonce,
+      authKey: amountAuthKey,
+    } = processPoseidonEncryption([depositAmountBigInt], publicKeyBigInt)
+
+    // A Poseidon-Ciphertext (PCT) is a 7-element array composed of:
+    // [ciphertext (4 elements), authKey (2 elements), nonce (1 element)]
+    const amountPCT: [bigint, bigint, bigint, bigint, bigint, bigint, bigint] =
+      [
+        ...amountCiphertext.slice(0, 4), // First 4 elements of ciphertext
+        ...amountAuthKey, // Next 2 elements are the authKey
+        amountNonce, // Final element is the nonce
+      ] as [bigint, bigint, bigint, bigint, bigint, bigint, bigint]
+
+    console.log(
+      'WalletDialog: Generated amountPCT for EERC deposit:',
+      amountPCT
+    )
+
+    // Approve EERC contract to spend tokens
+    console.log('WalletDialog: Approving EERC contract to spend tokens...')
+    const approveEERCTransaction = approve({
+      contract: tokenToDeposit,
+      spender: CONTRACT_ADDRESSES.EERC,
+      amount: depositAmount.toString(),
+    })
+
+    await sendTransaction({
+      transaction: approveEERCTransaction,
+      account: account,
+    })
+    console.log('WalletDialog: EERC approval successful')
+
+    // Get encrypted balance before deposit
+    let balanceBeforeDeposit = 0n
+    try {
+      const [eGCT, nonce, amountPCTs, balancePCT, transactionIndex] =
+        await readContract({
+          contract: eercContract,
+          method: 'getBalanceFromTokenAddress',
+          params: [account.address, tokenAddress],
+        })
+
+      const encryptedBalance = [
+        [BigInt(eGCT.c1.x.toString()), BigInt(eGCT.c1.y.toString())],
+        [BigInt(eGCT.c2.x.toString()), BigInt(eGCT.c2.y.toString())],
+      ]
+      const balancePCTArray = balancePCT.map((x: any) => BigInt(x.toString()))
+
+      advanceProgress()
+
+      balanceBeforeDeposit = await getDecryptedBalance(
+        userPrivateKey,
+        [...amountPCTs],
+        balancePCTArray,
+        encryptedBalance
+      )
+      console.log(
+        'WalletDialog: Balance before EERC deposit:',
+        balanceBeforeDeposit.toString()
+      )
+    } catch (error) {
+      console.log(
+        'WalletDialog: No existing EERC balance found (first deposit)'
+      )
+    }
+
+    // Deposit into EERC contract
+    console.log('WalletDialog: Depositing into EERC contract...')
+    const eercDepositTransaction = prepareContractCall({
+      contract: eercContract,
+      method: 'deposit',
+      params: [depositAmount, tokenAddress, amountPCT],
+    })
+
+    await sendTransaction({
+      transaction: eercDepositTransaction,
+      account: account,
+    })
+    console.log('WalletDialog: EERC deposit successful')
+
+    // Get encrypted balance after deposit to calculate received tokens
+    let balanceAfterDeposit = 0n
+    try {
+      // Wait a bit for the transaction to be processed
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+
+      console.log('tokenAddress_reading_in_WalletDialog:', tokenAddress)
+      const [eGCT, nonce, amountPCTs, balancePCT, transactionIndex] =
+        await readContract({
+          contract: eercContract,
+          method: 'getBalanceFromTokenAddress',
+          params: [account.address, tokenAddress],
+        })
+
+      const encryptedBalance = [
+        [BigInt(eGCT.c1.x.toString()), BigInt(eGCT.c1.y.toString())],
+        [BigInt(eGCT.c2.x.toString()), BigInt(eGCT.c2.y.toString())],
+      ]
+      const balancePCTArray = balancePCT.map((x: any) => BigInt(x.toString()))
+
+      balanceAfterDeposit = await getDecryptedBalance(
+        userPrivateKey,
+        [...amountPCTs], // Convert readonly array to mutable array
+        balancePCTArray,
+        encryptedBalance
+      )
+      console.log(
+        'WalletDialog: Balance after EERC deposit:',
+        balanceAfterDeposit.toString()
+      )
+    } catch (error) {
+      console.error(
+        'WalletDialog: Error getting balance after EERC deposit:',
+        error
+      )
+    }
+
+    const encryptedTokensReceived = balanceAfterDeposit - balanceBeforeDeposit
+    console.log(
+      'WalletDialog: Encrypted tokens received:',
+      encryptedTokensReceived.toString()
+    )
+
+    return {
+      encryptedTokensReceived: Number(encryptedTokensReceived) / 1e2, // Convert from encrypted system decimals (2)
+      tokenAddress,
+    }
+  }
+
+  const handleTopUp = async () => {
+    if (!wageGroup || !amount || parseFloat(amount) <= 0 || !account) return
+
+    try {
+      setIsLoading(true)
+
+      const hasYieldSource =
+        wageGroup.yieldSource && wageGroup.yieldSource !== 'none'
+      initializeProgress(!!hasYieldSource)
+
+      const depositAmount = BigInt(Math.floor(parseFloat(amount) * 1e6))
+
+      if (!usdcContract || !eercContract) {
+        console.error('Contracts not initialized')
+        return
+      }
+
+      let sharesReceived: number | undefined
+      let encryptedTokensReceived: number
+
+      // Step 1: Initiating USDC transfer
+      advanceProgress()
+
+      if (!hasYieldSource) {
+        // Direct USDC deposit into EERC
+        console.log('WalletDialog: Direct USDC to EERC deposit')
+
+        // Step 2: Encrypting USDC
+        advanceProgress()
+
+        const depositResult = await depositIntoEERC(
+          usdcContract,
+          depositAmount,
+          CONTRACT_ADDRESSES.USDC
+        )
+
+        console.log('Deposit USDC into EERC successful!')
+
+        if (!depositResult) {
+          throw new Error('Failed to deposit into EERC')
+        }
+
+        encryptedTokensReceived = depositResult.encryptedTokensReceived
+
+        // Step 3: Finalising deposit
+        // advanceProgress()
+      } else {
+        // Deposit into yield vault first, then into EERC
+        const vaultAddress = getVaultAddress(wageGroup.yieldSource)
+        if (!vaultAddress) {
+          console.log('No yield source specified, skipping deposit')
+          onOpenChange(false)
+          return
+        }
+
+        console.log('WalletDialog: Vault address:', vaultAddress)
+
+        // Create vault contract
+        const vaultContract = getContract({
+          client: thirdwebClient,
+          chain,
+          address: vaultAddress,
+          abi: YIELD_VAULT_ABI,
+        })
+
+        // Get vault shares balance before deposit
+        const sharesBefore = await readContract({
+          contract: vaultContract,
+          method: 'balanceOf',
+          params: [account.address],
+        })
+
+        // Approve USDC spending for vault
+        const approveTransaction = approve({
+          contract: usdcContract,
+          spender: vaultAddress,
+          amount: amount,
+        })
+
+        const approvalTransactionReceipt = await sendTransaction({
+          transaction: approveTransaction,
+          account: account,
+        })
+        console.log(
+          'WalletDialog: Vault approval successful:',
+          approvalTransactionReceipt
+        )
+
+        // Step 2: Depositing into yield vault
+        advanceProgress()
+
+        // Deposit USDC into vault
+        const depositTransaction = prepareContractCall({
+          contract: vaultContract,
+          method: 'deposit',
+          params: [depositAmount, account.address],
+        })
+
+        const depositTransactionReceipt = await sendTransaction({
+          transaction: depositTransaction,
+          account: account,
+        })
+        console.log(
+          'WalletDialog: Vault deposit successful:',
+          depositTransactionReceipt
+        )
+
+        // Get vault shares balance after deposit
+        const sharesAfter = await readContract({
+          contract: vaultContract,
+          method: 'balanceOf',
+          params: [account.address],
+        })
+
+        const sharesReceivedBigInt = sharesAfter - sharesBefore
+        sharesReceived = Number(sharesReceivedBigInt) / 1e6 // Assuming 6 decimals for vault shares
+        console.log('WalletDialog: Shares received:', sharesReceived)
+
+        // Step 3: Encrypting yield shares
+        advanceProgress()
+
+        console.log('WalletDialog: Depositing vault shares into EERC...')
+
+        const depositResult = await depositIntoEERC(
+          vaultContract,
+          sharesReceivedBigInt,
+          vaultAddress
+        )
+
+        if (!depositResult) {
+          throw new Error('Failed to deposit vault shares into EERC')
+        }
+
+        encryptedTokensReceived = depositResult.encryptedTokensReceived
+
+        // Step 4: Finalising deposit
+        // advanceProgress()
+      }
+
+      // Final step: Deposit complete
+      advanceProgress()
+
+      // Store success data for top-up
+      setSuccessData({
+        usdcDeposited: parseFloat(amount),
+        sharesReceived,
+        encryptedTokensReceived,
+      })
+      setWalletSuccessMessage('') // Clear wallet success message for top-up
+
+      // Show success state
+      setShowSuccess(true)
+
+      // Reset form
+      setAmount('')
+
+      // Refresh balance after successful transaction
+      setTimeout(() => {
+        fetchUsdcBalance()
+      }, 2000)
+
+      // Close dialog after showing success message
+      setTimeout(() => {
+        setShowSuccess(false)
+        setSuccessData(null)
+        onOpenChange(false)
+      }, 4000)
+    } catch (error) {
+      console.error('WalletDialog: Error during top-up:', error)
+      // TODO: Add proper error handling/toast notification
+    } finally {
+      setIsLoading(false)
+      setDepositProgress({
+        currentStep: 0,
+        totalSteps: 0,
+        stepMessages: [],
+      })
     }
   }
 
@@ -489,286 +902,6 @@ export function WalletDialog({
     }
   }
 
-  // Helper function to deposit into EERC contract
-  const depositIntoEERC = async (
-    tokenToDeposit: any,
-    depositAmount: bigint,
-    tokenAddress: string
-  ) => {
-    if (!eercContract || !account) return null
-
-    console.log('WalletDialog: Starting EERC deposit process...')
-
-    // Generate keys for the user using the account directly
-    const { privateKey: userPrivateKey, publicKey: derivedPublicKey } =
-      await deriveKeysFromUser(account.address, account)
-    console.log('WalletDialog: Generated keys for EERC deposit')
-
-    // Generate amountPCT for auditing
-    const depositAmountBigInt = BigInt(depositAmount.toString())
-    const publicKeyBigInt = [derivedPublicKey[0], derivedPublicKey[1]]
-
-    const {
-      ciphertext: amountCiphertext,
-      nonce: amountNonce,
-      authKey: amountAuthKey,
-    } = processPoseidonEncryption([depositAmountBigInt], publicKeyBigInt)
-
-    // A Poseidon-Ciphertext (PCT) is a 7-element array composed of:
-    // [ciphertext (4 elements), authKey (2 elements), nonce (1 element)]
-    const amountPCT: [bigint, bigint, bigint, bigint, bigint, bigint, bigint] =
-      [
-        ...amountCiphertext.slice(0, 4), // First 4 elements of ciphertext
-        ...amountAuthKey, // Next 2 elements are the authKey
-        amountNonce, // Final element is the nonce
-      ] as [bigint, bigint, bigint, bigint, bigint, bigint, bigint]
-
-    console.log('WalletDialog: Generated amountPCT for EERC deposit')
-
-    // Approve EERC contract to spend tokens
-    console.log('WalletDialog: Approving EERC contract to spend tokens...')
-    const approveEERCTransaction = approve({
-      contract: tokenToDeposit,
-      spender: CONTRACT_ADDRESSES.EERC,
-      amount: depositAmount.toString(),
-    })
-
-    await sendTransaction({
-      transaction: approveEERCTransaction,
-      account: account,
-    })
-    console.log('WalletDialog: EERC approval successful')
-
-    // Get encrypted balance before deposit
-    let balanceBeforeDeposit = 0n
-    try {
-      const [eGCT, nonce, amountPCTs, balancePCT, transactionIndex] =
-        await readContract({
-          contract: eercContract,
-          method: 'getBalanceFromTokenAddress',
-          params: [account.address, tokenAddress],
-        })
-
-      const encryptedBalance = [
-        [BigInt(eGCT.c1.x.toString()), BigInt(eGCT.c1.y.toString())],
-        [BigInt(eGCT.c2.x.toString()), BigInt(eGCT.c2.y.toString())],
-      ]
-      const balancePCTArray = balancePCT.map((x: any) => BigInt(x.toString()))
-
-      balanceBeforeDeposit = await getDecryptedBalance(
-        userPrivateKey,
-        [...amountPCTs],
-        balancePCTArray,
-        encryptedBalance
-      )
-      console.log(
-        'WalletDialog: Balance before EERC deposit:',
-        balanceBeforeDeposit.toString()
-      )
-    } catch (error) {
-      console.log(
-        'WalletDialog: No existing EERC balance found (first deposit)'
-      )
-    }
-
-    // Deposit into EERC contract
-    console.log('WalletDialog: Depositing into EERC contract...')
-    const eercDepositTransaction = prepareContractCall({
-      contract: eercContract,
-      method: 'deposit',
-      params: [depositAmount, tokenAddress, amountPCT],
-    })
-
-    await sendTransaction({
-      transaction: eercDepositTransaction,
-      account: account,
-    })
-    console.log('WalletDialog: EERC deposit successful')
-
-    // Get encrypted balance after deposit to calculate received tokens
-    let balanceAfterDeposit = 0n
-    try {
-      // Wait a bit for the transaction to be processed
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-
-      const [eGCT, nonce, amountPCTs, balancePCT, transactionIndex] =
-        await readContract({
-          contract: eercContract,
-          method: 'getBalanceFromTokenAddress',
-          params: [account.address, tokenAddress],
-        })
-
-      const encryptedBalance = [
-        [BigInt(eGCT.c1.x.toString()), BigInt(eGCT.c1.y.toString())],
-        [BigInt(eGCT.c2.x.toString()), BigInt(eGCT.c2.y.toString())],
-      ]
-      const balancePCTArray = balancePCT.map((x: any) => BigInt(x.toString()))
-
-      balanceAfterDeposit = await getDecryptedBalance(
-        userPrivateKey,
-        [...amountPCTs], // Convert readonly array to mutable array
-        balancePCTArray,
-        encryptedBalance
-      )
-      console.log(
-        'WalletDialog: Balance after EERC deposit:',
-        balanceAfterDeposit.toString()
-      )
-    } catch (error) {
-      console.error(
-        'WalletDialog: Error getting balance after EERC deposit:',
-        error
-      )
-    }
-
-    const encryptedTokensReceived = balanceAfterDeposit - balanceBeforeDeposit
-    console.log(
-      'WalletDialog: Encrypted tokens received:',
-      encryptedTokensReceived.toString()
-    )
-
-    return Number(encryptedTokensReceived) / 1e2 // Convert from encrypted system decimals (2)
-  }
-
-  const handleTopUp = async () => {
-    if (!wageGroup || !amount || parseFloat(amount) <= 0 || !account) return
-
-    try {
-      setIsLoading(true)
-
-      const depositAmount = BigInt(Math.floor(parseFloat(amount) * 1e6))
-
-      if (!usdcContract || !eercContract) {
-        console.error('Contracts not initialized')
-        return
-      }
-
-      let sharesReceived: number | undefined
-      let encryptedTokensReceived: number
-
-      if (wageGroup.yieldSource === 'none' || !wageGroup.yieldSource) {
-        // Direct USDC deposit into EERC
-        console.log('WalletDialog: Direct USDC to EERC deposit')
-
-        encryptedTokensReceived =
-          (await depositIntoEERC(
-            usdcContract,
-            depositAmount,
-            CONTRACT_ADDRESSES.USDC
-          )) || 0
-      } else {
-        // Deposit into yield vault first, then into EERC
-        const vaultAddress = getVaultAddress(wageGroup.yieldSource)
-        if (!vaultAddress) {
-          console.log('No yield source specified, skipping deposit')
-          onOpenChange(false)
-          return
-        }
-
-        console.log('WalletDialog: Vault address:', vaultAddress)
-
-        // Create vault contract
-        const vaultContract = getContract({
-          client: thirdwebClient,
-          chain,
-          address: vaultAddress,
-          abi: YIELD_VAULT_ABI,
-        })
-
-        // Get vault shares balance before deposit
-        const sharesBefore = await readContract({
-          contract: vaultContract,
-          method: 'balanceOf',
-          params: [account.address],
-        })
-
-        // Step 1: Approve USDC spending for vault
-        const approveTransaction = approve({
-          contract: usdcContract,
-          spender: vaultAddress,
-          amount: amount,
-        })
-
-        const approvalTransactionReceipt = await sendTransaction({
-          transaction: approveTransaction,
-          account: account,
-        })
-        console.log(
-          'WalletDialog: Vault approval successful:',
-          approvalTransactionReceipt
-        )
-
-        // Step 2: Deposit USDC into vault
-        const depositTransaction = prepareContractCall({
-          contract: vaultContract,
-          method: 'deposit',
-          params: [depositAmount, account.address],
-        })
-
-        const depositTransactionReceipt = await sendTransaction({
-          transaction: depositTransaction,
-          account: account,
-        })
-        console.log(
-          'WalletDialog: Vault deposit successful:',
-          depositTransactionReceipt
-        )
-
-        // Get vault shares balance after deposit
-        const sharesAfter = await readContract({
-          contract: vaultContract,
-          method: 'balanceOf',
-          params: [account.address],
-        })
-
-        const sharesReceivedBigInt = sharesAfter - sharesBefore
-        sharesReceived = Number(sharesReceivedBigInt) / 1e6 // Assuming 6 decimals for vault shares
-        console.log('WalletDialog: Shares received:', sharesReceived)
-
-        // Step 3: Deposit vault shares into EERC
-        console.log('WalletDialog: Depositing vault shares into EERC...')
-
-        encryptedTokensReceived =
-          (await depositIntoEERC(
-            vaultContract,
-            sharesReceivedBigInt,
-            vaultAddress
-          )) || 0
-      }
-
-      // Store success data for top-up
-      setSuccessData({
-        usdcDeposited: parseFloat(amount),
-        sharesReceived,
-        encryptedTokensReceived,
-      })
-      setWalletSuccessMessage('') // Clear wallet success message for top-up
-
-      // Show success state
-      setShowSuccess(true)
-
-      // Reset form
-      setAmount('')
-
-      // Refresh balance after successful transaction
-      setTimeout(() => {
-        fetchUsdcBalance()
-      }, 2000)
-
-      // Close dialog after showing success message
-      setTimeout(() => {
-        setShowSuccess(false)
-        setSuccessData(null)
-        onOpenChange(false)
-      }, 3000) // Increased timeout to show more details
-    } catch (error) {
-      console.error('WalletDialog: Error during top-up:', error)
-      // TODO: Add proper error handling/toast notification
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
   const handleRefreshBalance = () => {
     if (!account?.address) {
       setBalanceError('No wallet connected')
@@ -807,6 +940,12 @@ export function WalletDialog({
       setIncludeSelf(true)
       setOwnerEmails([''])
       setThreshold(1)
+      // Reset progress state
+      setDepositProgress({
+        currentStep: 0,
+        totalSteps: 0,
+        stepMessages: [],
+      })
       // Reset ALL tracking refs to prevent lingering state
       fetchInProgressRef.current = false
       lastSuccessfulFetchRef.current = ''
@@ -875,6 +1014,65 @@ export function WalletDialog({
               </div>
             )}
           </div>
+        ) : isLoading ? (
+          // Loading State with Progress Bar
+          <div className="flex flex-col items-center justify-center flex-1 px-6">
+            <div className="bg-gradient-to-r from-purple-400 to-violet-500 rounded-full p-4 mb-6 shadow-lg">
+              <Loader2 className="w-12 h-12 text-white animate-spin" />
+            </div>
+            <h3 className="text-2xl font-semibold text-purple-900 mb-6 text-center">
+              Processing Deposit
+            </h3>
+
+            {/* Progress Bar */}
+            <div className="w-full max-w-sm space-y-4">
+              <Progress
+                value={
+                  (depositProgress.currentStep / depositProgress.totalSteps) *
+                  100
+                }
+                className="h-3 bg-purple-100 [&>div]:bg-violet-300"
+              />
+
+              {/* Current Step Display */}
+              <div className="text-center">
+                <p className="text-purple-700 font-medium">
+                  Step {depositProgress.currentStep} of{' '}
+                  {depositProgress.totalSteps}
+                </p>
+                <p className="text-purple-600/70 text-sm mt-1">
+                  {depositProgress.stepMessages[
+                    depositProgress.currentStep - 1
+                  ] || 'Preparing...'}
+                </p>
+              </div>
+
+              {/* Step List */}
+              <div className="space-y-2">
+                {depositProgress.stepMessages.map((step, index) => (
+                  <div
+                    key={index}
+                    className={`flex items-center gap-2 text-sm ${
+                      index < depositProgress.currentStep
+                        ? 'text-green-600'
+                        : index === depositProgress.currentStep - 1
+                          ? 'text-purple-700 font-medium'
+                          : 'text-purple-400'
+                    }`}
+                  >
+                    {index < depositProgress.currentStep ? (
+                      <CheckCircle className="h-4 w-4 text-green-600" />
+                    ) : index === depositProgress.currentStep - 1 ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <div className="h-4 w-4 rounded-full border-2 border-purple-300" />
+                    )}
+                    <span>{step}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         ) : (
           <>
             {/* Header */}
@@ -928,8 +1126,28 @@ export function WalletDialog({
                           Go to Settings
                         </Button>
                       </div>
+                    ) : hasWallet && !wageGroup.eercRegistered ? (
+                      // Wallet exists but not eERC registered
+                      <div className="text-center py-8">
+                        <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                          <Shield className="h-8 w-8 text-orange-600" />
+                        </div>
+                        <h3 className="text-lg font-medium text-gray-900 mb-2">
+                          Wage group wallet not registered
+                        </h3>
+                        <p className="text-gray-500 mb-6">
+                          The wallet needs to be registered for encrypted
+                          transactions before you can add funds.
+                        </p>
+                        <Button
+                          onClick={handleGoToSettings}
+                          className="bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700"
+                        >
+                          Go to Settings
+                        </Button>
+                      </div>
                     ) : (
-                      // Rest of topup content...
+                      // Wallet exists and is eERC registered - show normal top up form
                       <>
                         {/* Monthly Total Info */}
                         <div className="bg-purple-50/50 rounded-lg p-4 text-center">
@@ -1048,10 +1266,7 @@ export function WalletDialog({
                             {isLoading ? (
                               <>
                                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                                {wageGroup.yieldSource !== 'none' &&
-                                wageGroup.yieldSource
-                                  ? 'Processing via Yield Vault & Encryption...'
-                                  : 'Processing Encrypted Deposit...'}
+                                Processing...
                               </>
                             ) : !account?.address ? (
                               'Connect Wallet First'
@@ -1162,10 +1377,10 @@ export function WalletDialog({
 
                             {/* Registration Status Details */}
                             {isSafeEercPending && (
-                              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                              <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 mb-4">
                                 <div className="space-y-2">
                                   {isSafePreparingProof && (
-                                    <div className="flex items-center gap-2 text-blue-700">
+                                    <div className="flex items-center gap-2 text-purple-700">
                                       <Loader2 className="h-4 w-4 animate-spin" />
                                       <span className="text-sm">
                                         Generating zero-knowledge proof...
@@ -1173,7 +1388,7 @@ export function WalletDialog({
                                     </div>
                                   )}
                                   {isSafeProposing && (
-                                    <div className="flex items-center gap-2 text-blue-700">
+                                    <div className="flex items-center gap-2 text-purple-700">
                                       <Loader2 className="h-4 w-4 animate-spin" />
                                       <span className="text-sm">
                                         Proposing transaction to create Safe
@@ -1192,7 +1407,7 @@ export function WalletDialog({
                                     </div>
                                   )}
                                   {isSafeExecuting && (
-                                    <div className="flex items-center gap-2 text-blue-700">
+                                    <div className="flex items-center gap-2 text-purple-700">
                                       <Loader2 className="h-4 w-4 animate-spin" />
                                       <span className="text-sm">
                                         Completing transaction...
@@ -1201,10 +1416,10 @@ export function WalletDialog({
                                   )}
                                   {safeTxHash && (
                                     <div className="mt-2">
-                                      <p className="text-xs text-blue-600 font-medium">
+                                      <p className="text-xs text-purple-600 font-medium">
                                         Safe Transaction Hash:
                                       </p>
-                                      <p className="text-xs font-mono text-blue-500 break-all">
+                                      <p className="text-xs font-mono text-purple-500 break-all">
                                         {safeTxHash}
                                       </p>
                                     </div>

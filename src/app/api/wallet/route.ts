@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/clients/prisma'
 import { i0 } from '@/lib/crypto-utils'
 import { sendWalletOwnerInvitation } from '@/lib/email'
+import { getAppUrls } from '@/lib/environment'
 import { getChain } from '@/lib/environment/get-chain'
 import { checkAuthStatus } from '@/actions/auth'
 
@@ -32,6 +33,44 @@ interface WalletData {
   }>
   threshold: number | null
   safeWalletAddress: string | null
+}
+
+// Helper function to fund wallet with AVAX
+async function fundWalletWithAvax(walletAddress: string): Promise<boolean> {
+  try {
+    const { faucetApi } = getAppUrls()
+
+    console.log(`Funding wallet ${walletAddress} with 0.5 AVAX...`)
+
+    const response = await fetch(`${faucetApi}/api/faucet/avax`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        address: walletAddress,
+        amount: 0.5,
+      }),
+    })
+
+    if (!response.ok) {
+      console.error(`Faucet request failed with status: ${response.status}`)
+      return false
+    }
+
+    const data = await response.json()
+
+    if (data.success) {
+      console.log(`Successfully funded wallet ${walletAddress} with 0.5 AVAX`)
+      return true
+    } else {
+      console.error(`Faucet request failed: ${data.error}`)
+      return false
+    }
+  } catch (error) {
+    console.error(`Error funding wallet ${walletAddress}:`, error)
+    return false
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -175,6 +214,24 @@ export async function POST(request: NextRequest) {
           transport: http(thirdwebChain.rpc),
         })
 
+        // 👇 NEW: FUND THE SIGNER EOA BEFORE DEPLOYMENT — THIS IS THE CRITICAL FIX
+        const fundingSignerSuccess = await fundWalletWithAvax(ownerAddress)
+        if (!fundingSignerSuccess) {
+          console.error(
+            `Failed to fund signer account ${ownerAddress} with AVAX`
+          )
+          return NextResponse.json(
+            {
+              error:
+                'Failed to fund signer account with AVAX. Please try again.',
+            },
+            { status: 500 }
+          )
+        }
+        console.log(
+          `Successfully funded signer account ${ownerAddress} with 0.5 AVAX`
+        )
+
         // Check if Safe already exists (shouldn't happen with unique salt, but good to verify)
         try {
           const existingCode = await publicClient.getBytecode({
@@ -202,11 +259,15 @@ export async function POST(request: NextRequest) {
               },
             })
 
+            // Fund the existing wallet with 0.5 AVAX (the Safe address, not the deployer)
+            const fundingSuccess = await fundWalletWithAvax(safeAddress)
+
             return NextResponse.json({
               success: true,
               safeAddress,
               saltNonce,
               message: 'Existing wallet linked successfully',
+              fundingSuccess,
             })
           }
         } catch (checkError) {
@@ -267,12 +328,16 @@ export async function POST(request: NextRequest) {
           },
         })
 
+        // Fund the newly created Safe wallet with 0.5 AVAX (for wallet operating funds)
+        const fundingSuccess = await fundWalletWithAvax(safeAddress)
+
         return NextResponse.json({
           success: true,
           safeAddress,
           saltNonce,
           transactionHash,
           message: 'Wallet created successfully',
+          fundingSuccess,
         })
       } catch (error) {
         console.error('Error creating Safe:', error)

@@ -202,7 +202,7 @@ export function PaymentGroupsSection({
                       <div className="bg-white/50 backdrop-blur-sm rounded-lg p-4 border border-white/30">
                         <div className="flex items-center justify-between mb-3">
                           <h5 className="text-sm font-bold text-gray-800 flex items-center space-x-2">
-                            <div className="w-2 h-2 bg-indigo-500 rounded-full"></div>
+                            <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
                             <span>Team Members ({group.payees.length})</span>
                           </h5>
                         </div>
