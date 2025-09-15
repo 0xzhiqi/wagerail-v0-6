@@ -994,7 +994,7 @@ export function WalletDialog({
                 <p className="text-purple-600/70">
                   Deposited:{' '}
                   <span className="font-semibold">
-                    ${successData.usdcDeposited.toFixed(2)} USDC
+                    {successData.usdcDeposited.toFixed(2)} USDC
                   </span>
                 </p>
                 {successData.sharesReceived && (

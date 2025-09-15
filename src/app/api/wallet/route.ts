@@ -40,6 +40,7 @@ async function fundWalletWithAvax(walletAddress: string): Promise<boolean> {
   try {
     const { faucetApi } = getAppUrls()
 
+    console.log(`Using faucet API: ${faucetApi}`)
     console.log(`Funding wallet ${walletAddress} with 0.5 AVAX...`)
 
     const response = await fetch(`${faucetApi}/api/faucet/avax`, {
@@ -49,7 +50,7 @@ async function fundWalletWithAvax(walletAddress: string): Promise<boolean> {
       },
       body: JSON.stringify({
         address: walletAddress,
-        amount: 0.5,
+        amount: 2,
       }),
     })
 
