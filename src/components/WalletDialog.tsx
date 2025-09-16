@@ -119,6 +119,9 @@ export function WalletDialog({
   const [walletSuccessMessage, setWalletSuccessMessage] = useState('')
   const [activeTab, setActiveTab] = useState('topup')
 
+  // Add local state to track eERC registration status
+  const [localEercRegistered, setLocalEercRegistered] = useState(false)
+
   // Progress tracking state
   const [depositProgress, setDepositProgress] = useState<DepositProgress>({
     currentStep: 0,
@@ -164,6 +167,13 @@ export function WalletDialog({
     threshold: walletData?.threshold || 1,
   })
 
+  // Initialize local state when wageGroup changes
+  useEffect(() => {
+    if (wageGroup) {
+      setLocalEercRegistered(wageGroup.eercRegistered)
+    }
+  }, [wageGroup?.id, wageGroup?.eercRegistered])
+
   useEffect(() => {
     const loadClient = async () => {
       try {
@@ -187,15 +197,17 @@ export function WalletDialog({
       )
       successHandledRef.current = true
 
+      // Update local state immediately
+      setLocalEercRegistered(true)
       setShowSafeEercSuccess(true)
 
-      // Update the wage group's eERC status immediately
+      // Update the wage group's eERC status and notify parent component
       const updatedWageGroup = {
         ...wageGroup,
         eercRegistered: true,
       }
 
-      // Notify parent component of the update
+      // Call parent component to refresh the wage group data from the server
       if (onWageGroupUpdate) {
         onWageGroupUpdate(updatedWageGroup)
       }
@@ -889,6 +901,8 @@ export function WalletDialog({
           setActiveTab('topup')
           // Clear fetch tracking to allow fresh fetch
           lastSuccessfulFetchRef.current = ''
+          // Force refresh wallet data
+          fetchWalletData()
         }, 2000)
       } else {
         console.error('Failed to create wallet:', result.error)
@@ -950,6 +964,8 @@ export function WalletDialog({
       fetchInProgressRef.current = false
       lastSuccessfulFetchRef.current = ''
       successHandledRef.current = false
+      // Reset local eERC state
+      setLocalEercRegistered(false)
     }
   }, [open])
 
@@ -966,6 +982,9 @@ export function WalletDialog({
   const hasWallet = Boolean(
     wageGroup.safeWalletAddress || walletData?.safeWalletAddress
   )
+
+  // Use local state for eERC registration status - this ensures immediate updates
+  const isEercRegistered = localEercRegistered || wageGroup.eercRegistered
 
   return (
     <div className="fixed top-[0.01%] bottom-[0.01%] left-0 right-0 backdrop-blur-md bg-white/30 flex items-center justify-center z-50 p-4 overflow-hidden">
@@ -1126,7 +1145,7 @@ export function WalletDialog({
                           Go to Settings
                         </Button>
                       </div>
-                    ) : hasWallet && !wageGroup.eercRegistered ? (
+                    ) : hasWallet && !isEercRegistered ? (
                       // Wallet exists but not eERC registered
                       <div className="text-center py-8">
                         <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -1149,6 +1168,21 @@ export function WalletDialog({
                     ) : (
                       // Wallet exists and is eERC registered - show normal top up form
                       <>
+                        {/* Success notification for eERC registration */}
+                        {/* {showSafeEercSuccess && (
+                          <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg p-4 animate-in slide-in-from-top duration-300 mb-4">
+                            <div className="flex items-center gap-2">
+                              <CheckCircle className="h-5 w-5 text-green-600" />
+                              <h3 className="font-medium text-green-800">
+                                eERC Registration Complete!
+                              </h3>
+                            </div>
+                            <p className="text-sm text-green-700 mt-1">
+                              Your Safe wallet can now use encrypted tokens.
+                            </p>
+                          </div>
+                        )} */}
+
                         {/* Monthly Total Info */}
                         <div className="bg-purple-50/50 rounded-lg p-4 text-center">
                           <p className="text-sm text-purple-600 mb-1">
@@ -1288,7 +1322,7 @@ export function WalletDialog({
                       // Wallet already exists - show current status
                       <div className="space-y-6">
                         {/* Safe eERC Registration Success Message */}
-                        {showSafeEercSuccess && (
+                        {/* {showSafeEercSuccess && (
                           <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg p-4 animate-in slide-in-from-top duration-300">
                             <div className="flex items-center gap-2">
                               <CheckCircle className="h-5 w-5 text-green-600" />
@@ -1300,7 +1334,7 @@ export function WalletDialog({
                               Your Safe wallet can now use encrypted tokens.
                             </p>
                           </div>
-                        )}
+                        )} */}
 
                         {/* Wallet Status */}
                         <div className="bg-green-50 border border-green-200 rounded-lg p-4">
@@ -1331,7 +1365,7 @@ export function WalletDialog({
                           <div className="border-t mt-6 border-gray-200 pt-4">
                             <div className="flex items-center justify-between mb-2 mr-4">
                               <div className="flex items-center gap-2"></div>
-                              {wageGroup.eercRegistered ? (
+                              {isEercRegistered ? (
                                 <div className="flex items-center space-x-1 text-green-600 bg-green-200 px-3 py-1.5 rounded-md">
                                   <ShieldCheck className="h-4 w-4" />
                                   <span className="text-sm font-medium">
@@ -1346,19 +1380,12 @@ export function WalletDialog({
                                       isSafeEercPending ||
                                       !walletData?.safeWalletAddress
                                     }
-                                    className="w-full bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700"
+                                    className="w-full bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700"
                                     size="sm"
                                   >
                                     {isSafeEercPending ? (
                                       <span className="flex items-center">
                                         <Loader2 className="animate-spin mr-2 h-3 w-3" />
-                                        {isSafePreparingProof &&
-                                          'Generating Proof...'}
-                                        {isSafeProposing &&
-                                          'Proposing Transaction...'}
-                                        {isSafeWaitingSignatures &&
-                                          `Waiting for ${pendingSignatures} signatures...`}
-                                        {isSafeExecuting && 'Executing...'}
                                       </span>
                                     ) : (
                                       <>
@@ -1383,7 +1410,7 @@ export function WalletDialog({
                                     <div className="flex items-center gap-2 text-purple-700">
                                       <Loader2 className="h-4 w-4 animate-spin" />
                                       <span className="text-sm">
-                                        Generating zero-knowledge proof...
+                                        Generating proof of your identity ...
                                       </span>
                                     </div>
                                   )}
@@ -1391,8 +1418,7 @@ export function WalletDialog({
                                     <div className="flex items-center gap-2 text-purple-700">
                                       <Loader2 className="h-4 w-4 animate-spin" />
                                       <span className="text-sm">
-                                        Proposing transaction to create Safe
-                                        wallet...
+                                        Sending registration request...
                                       </span>
                                     </div>
                                   )}
@@ -1417,7 +1443,7 @@ export function WalletDialog({
                                   {safeTxHash && (
                                     <div className="mt-2">
                                       <p className="text-xs text-purple-600 font-medium">
-                                        Safe Transaction Hash:
+                                        Blockchain Transaction Hash:
                                       </p>
                                       <p className="text-xs font-mono text-purple-500 break-all">
                                         {safeTxHash}
@@ -1516,7 +1542,7 @@ export function WalletDialog({
                           )}
                       </div>
                     ) : (
-                      // No wallet yet - show creation form
+                      // No wallet yet - show creation form (same as before, no changes needed for this part)
                       <div className="space-y-6">
                         <div className="text-center mb-6">
                           <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4">

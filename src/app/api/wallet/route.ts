@@ -50,7 +50,7 @@ async function fundWalletWithAvax(walletAddress: string): Promise<boolean> {
       },
       body: JSON.stringify({
         address: walletAddress,
-        amount: 2,
+        amount: 0.5,
       }),
     })
 
@@ -203,6 +203,8 @@ export async function POST(request: NextRequest) {
             },
           },
         }
+
+        console.log('viemChain:', viemChain)
 
         const walletClient = createWalletClient({
           account: derivedAccount, // Use derived account
